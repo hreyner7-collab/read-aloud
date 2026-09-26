@@ -1,0 +1,8 @@
+edge-tts>=7.2
+miniaudio>=1.61
+aiohttp>=3.9
+certifi
+pyobjc-framework-Cocoa; sys_platform == "darwin"
+pyobjc-framework-Quartz; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices; sys_platform == "darwin"
+pyobjc-framework-ServiceManagement; sys_platform == "darwin"

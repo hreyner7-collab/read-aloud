@@ -1,0 +1,90 @@
+name: Build Read Aloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: ReadAloud-Windows.exe
+          - os: macos-latest
+            artifact: ReadAloud-Mac.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: pyinstaller ReadAloud.spec --noconfirm --clean
+
+      - name: Self-test (Windows) - launch the real .exe, fetch real speech
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\selftest.json"
+          $p = Start-Process -FilePath "dist\ReadAloud.exe" -ArgumentList "--selftest","$out" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "app did not finish self-test" }
+          Get-Content $out
+          python -c "import json,sys; r=json.load(open(r'$out')); sys.exit(0 if r.get('ok') else 1)"
+
+      - name: Self-test (Mac) - launch the real .app, fetch real speech
+        if: runner.os == 'macOS'
+        run: |
+          out="$RUNNER_TEMP/selftest.json"
+          "dist/Read Aloud.app/Contents/MacOS/Read Aloud" --selftest "$out" &
+          pid=$!
+          for i in $(seq 1 120); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          kill $pid 2>/dev/null || true
+          cat "$out"
+          python -c "import json,sys; r=json.load(open('$out')); sys.exit(0 if r.get('ok') else 1)"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: copy dist\ReadAloud.exe ${{ matrix.artifact }}
+
+      - name: Package (Mac)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/Read Aloud.app" ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Read Aloud 1.0.${{ github.run_number }}
+          make_latest: true
+          files: |
+            ReadAloud-Windows.exe
+            ReadAloud-Mac.zip
+          body: |
+            **Windows:** download `ReadAloud-Windows.exe` and double-click it.
+            **Mac (Apple Silicon):** download `ReadAloud-Mac.zip`, open it, and drag **Read Aloud** into Applications.
+
+            See the README for first-launch steps (unsigned app warnings).
