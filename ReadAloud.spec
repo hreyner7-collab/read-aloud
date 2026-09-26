@@ -11,6 +11,7 @@ if sys.platform == "darwin":
     hidden += ["ServiceManagement", "Quartz", "ApplicationServices", "AppKit", "Foundation"]
 else:
     hidden += ["tkinter", "tkinter.font", "tkinter.messagebox"]
+    datas += [("assets/icon.ico", "assets")]
 
 a = Analysis(["main.py"], datas=datas, binaries=binaries, hiddenimports=hidden,
              excludes=["numpy", "PIL", "matplotlib"])
@@ -27,7 +28,7 @@ if sys.platform == "darwin":
                      "CFBundleDisplayName": "Read Aloud",
                      "CFBundleShortVersionString": VERSION,
                      "CFBundleVersion": VERSION,
-                     "LSUIElement": True,           # no Dock icon, just the floating button
+                     "LSUIElement": False,          # show in the Dock so it can be quit normally
                      "NSHighResolutionCapable": True,
                      "LSMinimumSystemVersion": "11.0",
                  })

@@ -61,6 +61,14 @@ jobs:
           cat "$out"
           python -c "import json,sys; r=json.load(open('$out')); sys.exit(0 if r.get('ok') else 1)"
 
+      - name: Test closing it like a normal app (taskbar / Dock)
+        if: runner.os == 'Windows'
+        run: python scripts/test_close.py dist\ReadAloud.exe
+
+      - name: Test closing it like a normal app (Dock > Quit)
+        if: runner.os == 'macOS'
+        run: python scripts/test_close.py "dist/Read Aloud.app"
+
       - name: Check it runs on older Macs (right chip, macOS 11+)
         if: runner.os == 'macOS'
         run: python scripts/check_macos_compat.py "dist/Read Aloud.app" ${{ matrix.arch }} 11.0

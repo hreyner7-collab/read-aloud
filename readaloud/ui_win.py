@@ -31,6 +31,12 @@ HELP = ("Select text in any app, then click the round button to hear it read alo
         "and to start it automatically with Windows.")
 
 
+def _asset(name):
+    import sys
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base, "assets", name)
+
+
 def _dpi_aware():
     if IS_WIN:
         try:
@@ -139,12 +145,40 @@ class WinApp:
         c.bind("<ButtonRelease-1>", self._up)
         c.bind("<ButtonPress-3>", self._menu)
         r.update_idletasks()
-        if IS_WIN:  # never take focus away from the app you're reading in
+        # Closing from the taskbar (right-click > Close window) quits the app
+        r.protocol("WM_DELETE_WINDOW", self.quit)
+        icon = _asset("icon.ico")
+        if IS_WIN and os.path.exists(icon):
+            r.iconbitmap(default=icon)
+        self.hwnd = None
+        if IS_WIN:
+            # Never take focus from the app you're reading in, but DO show a
+            # taskbar button so it can be closed like any other app.
             u = ctypes.windll.user32
             hwnd = u.GetParent(r.winfo_id()) or r.winfo_id()
-            GWL_EXSTYLE, NOACTIVATE, TOOLWINDOW, TOPMOST = -20, 0x08000000, 0x80, 0x8
+            GWL_EXSTYLE, NOACTIVATE, TOOLWINDOW, APPWINDOW, TOPMOST = (
+                -20, 0x08000000, 0x80, 0x40000, 0x8)
+            style = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
             u.SetWindowLongW(hwnd, GWL_EXSTYLE,
-                             u.GetWindowLongW(hwnd, GWL_EXSTYLE) | NOACTIVATE | TOOLWINDOW | TOPMOST)
+                             (style | NOACTIVATE | APPWINDOW | TOPMOST) & ~TOOLWINDOW)
+            self.hwnd = hwnd
+            r.withdraw()             # re-show so the taskbar picks up the new style
+            r.after(50, r.deiconify)
+            r.after(1000, self._keep_visible)
+
+    def _keep_visible(self):
+        """Clicking the taskbar button could minimise a borderless window with no
+        way back - so if that happens, put the button straight back."""
+        u = ctypes.windll.user32
+        if self.hwnd and u.IsIconic(self.hwnd):
+            u.ShowWindow(self.hwnd, 4)  # SW_SHOWNOACTIVATE
+        self.root.after(500, self._keep_visible)
+
+    def quit(self):
+        try:
+            self.controller.engine.stop()
+        finally:
+            self.root.destroy()
 
     def _down(self, e):
         self._start = (e.x_root, e.y_root, self.root.winfo_x(), self.root.winfo_y())
@@ -186,7 +220,7 @@ class WinApp:
                               command=lambda: st.set_login_item(self.login_var.get()))
         m.add_command(label="How to use", command=lambda: self.welcome(force=True))
         m.add_separator()
-        m.add_command(label="Quit Read Aloud", command=self.root.destroy)
+        m.add_command(label="Quit Read Aloud", command=self.quit)
         self.menu = m
 
     def _menu(self, e):

@@ -11,7 +11,7 @@ from AppKit import (
     NSApplication,
     NSAppearance,
     NSAppearanceNameDarkAqua,
-    NSApplicationActivationPolicyAccessory,
+    NSApplicationActivationPolicyRegular,
     NSBackingStoreBuffered,
     NSColor,
     NSControlSizeSmall,
@@ -195,12 +195,23 @@ class MacApp:
     def __init__(self, selftest=None):
         self.selftest = selftest
         self.nsapp = NSApplication.sharedApplication()
-        self.nsapp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        # Show in the Dock so it can be quit like any app (right-click > Quit, or Cmd+Q)
+        self.nsapp.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+        self._build_main_menu()
         self.settings = st.load()
         self.controller = Controller(AppHelper.callAfter, selection_mac, self.settings)
         self._build_window()
         self.controller.view = self
         self._build_menu()
+
+    def _build_main_menu(self):
+        bar = NSMenu.alloc().init()
+        app_item = NSMenuItem.alloc().init()
+        bar.addItem_(app_item)
+        app_menu = NSMenu.alloc().initWithTitle_("Read Aloud")
+        app_menu.addItemWithTitle_action_keyEquivalent_("Quit Read Aloud", "terminate:", "q")
+        app_item.setSubmenu_(app_menu)
+        self.nsapp.setMainMenu_(bar)
 
     # ---- used by Controller
     def show(self, state):
