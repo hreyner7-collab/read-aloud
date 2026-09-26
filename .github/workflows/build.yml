@@ -16,9 +16,15 @@ jobs:
         include:
           - os: windows-latest
             artifact: ReadAloud-Windows.exe
-          - os: macos-latest
+          - os: macos-latest            # Apple Silicon (M1 and newer)
             artifact: ReadAloud-Mac.zip
+            arch: arm64
+          - os: macos-15-intel          # Intel Macs (2015-2020)
+            artifact: ReadAloud-Mac-Intel.zip
+            arch: x86_64
     runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"  # run on macOS Big Sur and later
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +61,10 @@ jobs:
           cat "$out"
           python -c "import json,sys; r=json.load(open('$out')); sys.exit(0 if r.get('ok') else 1)"
 
+      - name: Check it runs on older Macs (right chip, macOS 11+)
+        if: runner.os == 'macOS'
+        run: python scripts/check_macos_compat.py "dist/Read Aloud.app" ${{ matrix.arch }} 11.0
+
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: copy dist\ReadAloud.exe ${{ matrix.artifact }}
@@ -83,8 +93,12 @@ jobs:
           files: |
             ReadAloud-Windows.exe
             ReadAloud-Mac.zip
+            ReadAloud-Mac-Intel.zip
           body: |
             **Windows:** download `ReadAloud-Windows.exe` and double-click it.
-            **Mac (Apple Silicon):** download `ReadAloud-Mac.zip`, open it, and drag **Read Aloud** into Applications.
+            **Mac with Apple Silicon (M1 or newer):** download `ReadAloud-Mac.zip`.
+            **Mac with Intel chip (2015-2020, macOS 11 Big Sur or newer):** download `ReadAloud-Mac-Intel.zip`.
+            Not sure which Mac you have? Apple menu > About This Mac: "Chip: Apple M..." means Apple Silicon, "Processor: ... Intel" means Intel.
+            On Mac, open the zip and drag **Read Aloud** into Applications.
 
             See the README for first-launch steps (unsigned app warnings).

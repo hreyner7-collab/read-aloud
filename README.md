@@ -17,6 +17,9 @@ Go to **[Releases → Latest](../../releases/latest)** and download:
 |---|---|
 | Windows 10 / 11 | `ReadAloud-Windows.exe` |
 | Mac with Apple Silicon (M1 or newer) | `ReadAloud-Mac.zip` |
+| Mac with an Intel chip (2015–2020), macOS 11 Big Sur or newer | `ReadAloud-Mac-Intel.zip` |
+
+Not sure which Mac you have? Click the Apple menu → **About This Mac**. If it says **Chip: Apple M…**, it's Apple Silicon. If it says **Processor: … Intel**, it's Intel.
 
 ## First launch
 

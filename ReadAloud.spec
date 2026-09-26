@@ -29,7 +29,7 @@ if sys.platform == "darwin":
                      "CFBundleVersion": VERSION,
                      "LSUIElement": True,           # no Dock icon, just the floating button
                      "NSHighResolutionCapable": True,
-                     "LSMinimumSystemVersion": "12.0",
+                     "LSMinimumSystemVersion": "11.0",
                  })
 else:
     exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="ReadAloud",
