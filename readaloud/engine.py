@@ -26,9 +26,15 @@ SPARES = 1                 # connections kept open and ready
 SPARE_MAX_AGE = 1800       # replace a spare after this long regardless (seconds)
 PING_EVERY = 10            # keep-alive ping on idle connections (seconds)
 PARALLEL = 2               # chunks downloading at once
-FIRST_CHUNK = 160          # max characters in the first chunk
-HEDGE_AFTER = 0.6          # s without audio on a spare -> race a fresh connection
+FIRST_CHUNK = 180          # max characters in the first chunk
+HEDGE_AFTER = 0.4          # s without audio on a spare -> race a fresh connection
 SAMPLE_RATE = 24000        # Microsoft sends 24 kHz mono MP3
+MIN_PREFILL_FRAMES = 480 * 6   # ~60ms before the very first sound
+CUSHION_FRAMES = 24000 * 3     # keep ~3s of decoded audio ready: Microsoft
+                               # stalls up to ~2.5s mid-chunk (measured), so
+                               # the cushion must ride those out gaplessly
+MAX_PCM_QUEUE = 24000 * 8      # cap decoder queue (~8s) to bound latency
+FEED_AHEAD = 3             # how many chunks to prefetch in parallel ahead of current
 
 # For testing only
 WSS_OVERRIDE = os.environ.get("READ_ALOUD_WSS_URL")
@@ -148,7 +154,7 @@ class StreamPlayer:
                 return self.src.read(n)
 
         self._src = _Src()
-        kwargs = dict(nchannels=1, sample_rate=SAMPLE_RATE, buffersize_msec=60,
+        kwargs = dict(nchannels=1, sample_rate=SAMPLE_RATE, buffersize_msec=120,
                       app_name="Read Aloud")
         if AUDIO_BACKEND:
             kwargs["backends"] = [getattr(miniaudio.Backend, AUDIO_BACKEND.upper())]
@@ -172,6 +178,10 @@ class StreamPlayer:
             ):
                 if self.stopped:
                     return
+                # Keep the decoder ahead but bounded: once the queue holds
+                # MAX_PCM_QUEUE frames (~8s), pause feeding until it drains.
+                while len(self.pcm) >= MAX_PCM_QUEUE and not self.stopped:
+                    time.sleep(0.01)
                 self.pcm.append(frames)
         except Exception as e:  # corrupt data etc.
             if not self.stopped:
@@ -183,17 +193,30 @@ class StreamPlayer:
         need = yield b""
         pending = array.array("h")
         started = finished = False
-        while True:
-            while len(pending) < need and self.pcm:
+        # Small prefill so the device opens on real audio, then a deep cushion
+        # absorbs network hiccups between chunks for the rest of the read.
+        while len(pending) < MIN_PREFILL_FRAMES and not self.stopped:
+            if self.pcm:
                 pending.extend(self.pcm.popleft())
-            if pending and not started:
-                started = True
-                self.on_first_sound()
+            elif self.decoded_all:
+                break
+            else:
+                time.sleep(0.005)
+        if pending and not started:
+            started = True
+            self.on_first_sound()
+        while True:
+            # Top the cushion up from decoded PCM whenever there is headroom.
+            while len(pending) < CUSHION_FRAMES and self.pcm:
+                pending.extend(self.pcm.popleft())
             if len(pending) < need:
                 if self.decoded_all and not self.pcm and not finished:
                     finished = True
                     self.on_finished()
-                pending.extend([0] * (need - len(pending)))  # silence
+                # Underflow: the cushion has run dry. Pad with silence so the
+                # device always gets a full callback; playback resumes the
+                # instant the next chunk arrives.
+                pending.extend([0] * (need - len(pending)))
             out, pending = pending[:need], pending[need:]
             need = yield out
 
@@ -544,7 +567,11 @@ class Reading:
                                 queues[i].put_nowait(e2)
                 queues[i].put_nowait(None)
 
-        tasks = [asyncio.ensure_future(fetch(i)) for i in range(n)]
+        # Limited lookahead: always FEED_AHEAD chunks fetching in the
+        # background while we drain and play the current one, so the decoder
+        # never runs dry waiting for the next chunk to be requested.
+        tasks = [asyncio.ensure_future(fetch(i))
+                 for i in range(min(n, FEED_AHEAD + 1))]
         try:
             for i in range(n):
                 while True:
@@ -556,6 +583,9 @@ class Reading:
                     if i == 0 and "first_byte" not in self.stats:
                         self.stats["first_byte"] = time.time()
                     self.player.feed(b)
+                nxt = i + FEED_AHEAD + 1
+                if nxt < n:
+                    tasks.append(asyncio.ensure_future(fetch(nxt)))
             self.player.end()
         finally:
             for t in tasks:
