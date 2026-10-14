@@ -56,8 +56,7 @@ jobs:
           $env:READ_ALOUD_AUDIO_BACKEND = "null"   # CI machines have no speakers
           $p = Start-Process -FilePath "dist\ReadAloud.exe" -ArgumentList "--selftest","$out" -PassThru
           if (-not $p.WaitForExit(300000)) { $p.Kill(); throw "app did not finish self-test" }
-          Get-Content $out
-          python -c "import json,sys; r=json.load(open(r'$out')); sys.exit(0 if r.get('ok') else 1)"
+          python scripts/check_selftest.py $out
 
       - name: Self-test (Mac) - launch the real .app, fetch real speech
         if: runner.os == 'macOS'
@@ -67,8 +66,7 @@ jobs:
           pid=$!
           for i in $(seq 1 300); do kill -0 $pid 2>/dev/null || break; sleep 1; done
           kill $pid 2>/dev/null || true
-          cat "$out"
-          python -c "import json,sys; r=json.load(open('$out')); sys.exit(0 if r.get('ok') else 1)"
+          python scripts/check_selftest.py "$out"
 
       - name: Test closing it like a normal app (taskbar / Dock)
         if: runner.os == 'Windows'
