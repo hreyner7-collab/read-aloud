@@ -45,6 +45,20 @@ jobs:
             --implementation cp --abi cp312 --platform macosx_11_0_${{ matrix.arch }} -d mac11
           pip install --force-reinstall --no-deps mac11/numpy-*.whl
 
+      - name: Build espeak-ng for macOS 11 (the packaged copy needs macOS 13.7/14)
+        if: runner.os == 'macOS'
+        run: |
+          git clone -q --depth 1 --branch 1.52.0 https://github.com/espeak-ng/espeak-ng.git espeak-src
+          cmake -S espeak-src -B espeak-build -DBUILD_SHARED_LIBS=ON -DUSE_MBROLA=OFF \
+            -DUSE_LIBSONIC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_ASYNC=OFF -DUSE_SPEECHPLAYER=OFF \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          cmake --build espeak-build --target espeak-ng -j3
+          built=espeak-build/src/libespeak-ng/libespeak-ng.1.52.0.dylib
+          dest=$(python -c "import espeakng_loader, os; print(os.path.dirname(espeakng_loader.__file__))")
+          for f in "$dest"/libespeak-ng*.dylib; do rm -f "$f"; cp "$built" "$f"; done
+          python scripts/check_macos_compat.py "$dest" ${{ matrix.arch }} 11.0
+
       - name: Build
         run: pyinstaller ReadAloud.spec --noconfirm --clean
 

@@ -55,6 +55,9 @@ def main(app, arch, limit):
           f"(limit {limit})")
     for b in bad:
         print("  PROBLEM:", b)
+    if bad:
+        print("::error::" + f"{len(bad)} binaries too new for macOS {limit} / {arch}: "
+              + " | ".join(bad[:12]))
     sys.exit(1 if bad else 0)
 
 
