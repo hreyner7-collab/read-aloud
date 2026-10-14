@@ -212,6 +212,12 @@ class WinApp:
         for rate, label in st.SPEEDS:
             speeds.add_radiobutton(label=label, value=rate, variable=self.rate_var,
                                    command=lambda: self.controller.set_rate(self.rate_var.get()))
+        self.offline_var = tk.BooleanVar(value=bool(self.settings.get("offline_only")))
+        voices.add_separator()
+        voices.add_checkbutton(label="Offline voice only (works without internet)",
+                               variable=self.offline_var,
+                               command=lambda: self.controller.set_offline_only(self.offline_var.get()))
+        voices.add_command(label=self.controller.offline_status(), state="disabled")
         m.add_cascade(label="Voice", menu=voices)
         m.add_cascade(label="Speed", menu=speeds)
         m.add_separator()
@@ -224,6 +230,7 @@ class WinApp:
         self.menu = m
 
     def _menu(self, e):
+        self._build_menu()  # so the offline-voice status is current
         try:
             self.menu.tk_popup(e.x_root, e.y_root)
         finally:

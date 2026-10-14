@@ -7,7 +7,8 @@ A small floating button that reads out any text you select, using Microsoft's na
 - The button stays on top of every window, and you can drag it anywhere.
 - Right-click it to change the voice (British, American or Australian, male or female) or the speed.
 - Speech starts almost instantly. It keeps a connection to Microsoft ready and plays the audio as it arrives.
-- It needs an internet connection. No account or sign-up.
+- No account or sign-up.
+- **Built-in offline voice.** If Microsoft's voices can't be reached (no internet, or Microsoft changes something), the button switches to an offline voice ([Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)) that runs on your own computer. You can also pick **Voice → Offline voice only**. The offline voice downloads once (177 MB) in the background the first time you open the app, and the menu shows its progress.
 
 ## Download
 
@@ -38,7 +39,8 @@ These builds aren't signed with a paid Apple or Microsoft developer certificate,
 
 ## Troubleshooting
 - **Orange button when clicked:** no text was selected (or, on a Mac, Accessibility permission isn't switched on yet).
-- **Red button:** it couldn't reach Microsoft, so check your internet connection.
+- **Red button:** it couldn't reach Microsoft and the offline voice isn't downloaded yet. Check your internet connection.
+- **Offline voice is slow to start on older computers.** It makes the speech on your own machine. Expect 1–2 seconds on an older laptop and well under a second on newer ones.
 - **Logs:** Windows `%APPDATA%\Read Aloud\read-aloud.log` · Mac `~/Library/Application Support/Read Aloud/read-aloud.log`
 
 ## How it works

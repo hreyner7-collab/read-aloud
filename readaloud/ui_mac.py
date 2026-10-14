@@ -77,6 +77,7 @@ class ButtonView(NSView):
             return None
         self.state = "idle"
         self.controller = None
+        self.app_ = None
         self.menu_ = None
         self._down = None
         inset = (SIZE - CIRCLE) / 2
@@ -163,6 +164,7 @@ class ButtonView(NSView):
             self.controller.click()
 
     def rightMouseDown_(self, event):
+        self.app_.refresh_menu()  # so the offline-voice status is current
         NSMenu.popUpContextMenu_withEvent_forView_(self.menu_, event, self)
 
 
@@ -178,6 +180,10 @@ class MenuHandler(NSObject):
 
     def pickSpeed_(self, sender):
         self.app.controller.set_rate(sender.representedObject())
+        self.app.refresh_menu()
+
+    def toggleOffline_(self, sender):
+        self.app.controller.set_offline_only(not self.app.settings.get("offline_only"))
         self.app.refresh_menu()
 
     def toggleLogin_(self, sender):
@@ -259,6 +265,7 @@ class MacApp:
         self.menu = NSMenu.alloc().init()
         self.menu.setAutoenablesItems_(False)
         self.view.menu_ = self.menu
+        self.view.app_ = self
         self.refresh_menu()
 
     def refresh_menu(self):
@@ -285,6 +292,11 @@ class MacApp:
         voices = submenu("Voice")
         for vid, label in st.VOICES:
             item(label, "pickVoice:", vid, vid == self.settings["voice"], voices)
+        voices.addItem_(NSMenuItem.separatorItem())
+        item("Offline voice only (works without internet)", "toggleOffline:",
+             on=bool(self.settings.get("offline_only")), parent=voices)
+        status = item(self.controller.offline_status(), None, parent=voices)
+        status.setEnabled_(False)
         speeds = submenu("Speed")
         for rate, label in st.SPEEDS:
             item(label, "pickSpeed:", rate, rate == self.settings["rate"], speeds)

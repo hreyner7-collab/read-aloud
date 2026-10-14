@@ -22,7 +22,8 @@ SPEEDS = [
     ("+30%", "Fastest"),
 ]
 
-DEFAULTS = {"voice": "en-GB-SoniaNeural", "rate": "+0%", "x": None, "y": None}
+DEFAULTS = {"voice": "en-GB-SoniaNeural", "rate": "+0%", "x": None, "y": None,
+            "offline_only": False}
 
 
 def load():

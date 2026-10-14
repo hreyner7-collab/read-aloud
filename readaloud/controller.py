@@ -20,6 +20,7 @@ class Controller:
         self._token = 0
         eng.VOICE = settings["voice"]
         eng.RATE = settings["rate"]
+        eng.OFFLINE_ONLY = bool(settings.get("offline_only"))
         self.engine = Engine(self._engine_state)
 
     # called from engine threads
@@ -76,6 +77,18 @@ class Controller:
     def set_rate(self, rate):
         eng.RATE = self.settings["rate"] = rate
         self._save()
+
+    def set_offline_only(self, on):
+        eng.OFFLINE_ONLY = self.settings["offline_only"] = bool(on)
+        if on:
+            self.engine.preload_offline()
+        self._save()
+
+    def offline_status(self):
+        try:
+            return self.engine.local.status_text()
+        except Exception:
+            return "Offline voice: unavailable"
 
     def moved(self, x, y):
         self.settings["x"], self.settings["y"] = x, y

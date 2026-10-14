@@ -2,6 +2,15 @@ edge-tts>=7.3.1   # 7.3 added the v2 access token Microsoft started requiring in
 miniaudio>=1.61
 aiohttp>=3.9
 certifi
+# Offline voice (Kokoro). onnxruntime 1.19.2 is the newest that still runs on
+# Intel Macs and on macOS 11; numpy 2.3.5 still has macOS 11 builds.
+numpy==2.3.5
+onnxruntime==1.19.2
+espeakng-loader==0.2.4
+attrs
+dlinfo
+joblib
+typing-extensions
 pyobjc-framework-Cocoa; sys_platform == "darwin"
 pyobjc-framework-Quartz; sys_platform == "darwin"
 pyobjc-framework-ApplicationServices; sys_platform == "darwin"

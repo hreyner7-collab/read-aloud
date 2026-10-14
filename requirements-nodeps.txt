@@ -1,0 +1,5 @@
+# Installed with --no-deps: kokoro-onnx asks for a newer onnxruntime than older
+# Macs can run (it works fine with 1.19.2), and phonemizer-fork would pull in
+# ~100 MB of libraries only used for unusual languages.
+kokoro-onnx==0.6.1
+phonemizer-fork==3.3.2

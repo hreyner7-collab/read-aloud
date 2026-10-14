@@ -1,12 +1,17 @@
 # PyInstaller build recipe for Read Aloud (Windows .exe and macOS .app)
 import sys
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
 
 VERSION = "1.0.0"
 datas, binaries, hidden = [], [], ["_cffi_backend"]
-for pkg in ("miniaudio", "cffi", "edge_tts", "certifi"):
+for pkg in ("miniaudio", "cffi", "edge_tts", "certifi", "espeakng_loader"):
     d, b, h = collect_all(pkg)
     datas += d; binaries += b; hidden += h
+# offline voice (Kokoro)
+datas += collect_data_files("kokoro_onnx") + copy_metadata("kokoro-onnx")
+datas += [("assets/kokoro-voices.npz", "assets")]
+hidden += ["kokoro_onnx", "onnxruntime", "phonemizer", "phonemizer.backend.espeak.wrapper",
+           "joblib", "dlinfo", "attrs", "numpy"]
 if sys.platform == "darwin":
     hidden += ["ServiceManagement", "Quartz", "ApplicationServices", "AppKit", "Foundation"]
 else:
@@ -14,7 +19,8 @@ else:
     datas += [("assets/icon.ico", "assets")]
 
 a = Analysis(["main.py"], datas=datas, binaries=binaries, hiddenimports=hidden,
-             excludes=["numpy", "PIL", "matplotlib"])
+             excludes=["PIL", "matplotlib", "sympy", "mpmath", "segments", "csvw", "babel",
+                       "rdflib", "jsonschema", "clldutils", "pandas", "scipy", "IPython"])
 pyz = PYZ(a.pure)
 
 if sys.platform == "darwin":

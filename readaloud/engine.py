@@ -28,6 +28,9 @@ PING_EVERY = 10            # keep-alive ping on idle connections (seconds)
 PARALLEL = 2               # chunks downloading at once
 FIRST_CHUNK = 160          # max characters in the first chunk
 HEDGE_AFTER = 0.6          # s without audio on a spare -> race a fresh connection
+EDGE_WAIT = 3.5            # s to wait for Microsoft before using the offline voice
+EDGE_RETRY_AFTER = 300     # after a failure, use the offline voice for up to this long
+OFFLINE_ONLY = False       # user setting: always use the offline voice
 SAMPLE_RATE = 24000        # Microsoft sends 24 kHz mono MP3
 
 # For testing only
@@ -131,9 +134,13 @@ class ByteSource:
 
 
 class StreamPlayer:
-    """Decodes a growing MP3 byte stream and plays it gaplessly (miniaudio)."""
+    """Plays audio gaplessly as it arrives (miniaudio).
 
-    def __init__(self, on_first_sound, on_finished):
+    mp3=True: decodes a growing MP3 byte stream (Microsoft voices).
+    mp3=False: takes ready-made 16-bit PCM via feed_pcm() (offline voice).
+    """
+
+    def __init__(self, on_first_sound, on_finished, mp3=True):
         import miniaudio
         self.ma = miniaudio
         self.src = ByteSource()
@@ -153,7 +160,9 @@ class StreamPlayer:
         if AUDIO_BACKEND:
             kwargs["backends"] = [getattr(miniaudio.Backend, AUDIO_BACKEND.upper())]
         self.device = miniaudio.PlaybackDevice(**kwargs)
-        threading.Thread(target=self._decode, daemon=True).start()
+        self.mp3 = mp3
+        if mp3:
+            threading.Thread(target=self._decode, daemon=True).start()
         gen = self._generator()
         next(gen)
         self.device.start(gen)  # opens the output now, while the network works
@@ -161,8 +170,14 @@ class StreamPlayer:
     def feed(self, data):
         self.src.feed(data)
 
+    def feed_pcm(self, samples):
+        self.pcm.append(samples)
+
     def end(self):
-        self.src.end()
+        if self.mp3:
+            self.src.end()
+        else:
+            self.decoded_all = True
 
     def _decode(self):
         try:
@@ -272,6 +287,7 @@ class Voice:
         self.last_use = 0.0
         self.idle_deaths = []      # how long spares lasted when Microsoft dropped them
         self.pings_work = True     # assume pings keep spares alive until shown otherwise
+        self.last_open_ok = 0.0
 
     async def _session(self):
         if self.session is None or self.session.closed:
@@ -308,6 +324,7 @@ class Voice:
             '"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},'
             '"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\n'
         )
+        self.last_open_ok = time.time()
         return Connection(ws, self.aiohttp.WSMsgType, self._conn_died)
 
     def _conn_died(self, conn):
@@ -475,10 +492,12 @@ class Voice:
 # ---------------------------------------------------------------- one read
 
 class Reading:
-    def __init__(self, voice, text, on_state):
-        self.voice = voice
+    def __init__(self, engine, text, on_state):
+        self.engine = engine
+        self.voice = engine.voice
         self.loop = asyncio.get_running_loop()
-        self.chunks = split_chunks(clean(text))
+        self.text = clean(text)
+        self.chunks = split_chunks(self.text)
         self.on_state = on_state
         self.t_start = time.time()
         self.player = None
@@ -499,9 +518,22 @@ class Reading:
         self.on_state("loading")
         ok = False
         try:
-            self.player = StreamPlayer(self._first_sound, self._finished)
-            await self._fetch_all()
-            await self.done.wait()
+            if self.engine.use_offline_first():
+                await self._speak_offline()
+            else:
+                try:
+                    await self._speak_online()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    # Microsoft unreachable and nothing played yet: use the offline voice
+                    if not self.engine.local.ready or "first_byte" in self.stats:
+                        raise
+                    log(f"Microsoft voices unavailable ({e!r}); switching to offline voice")
+                    self.engine.mark_edge_down()
+                    if self.player:
+                        self.player.stop()
+                    await self._speak_offline()
             ok = True
         except asyncio.CancelledError:
             ok = True
@@ -513,6 +545,39 @@ class Reading:
                 self.player.stop()
             self.on_state("idle" if ok else "error")
             self._log()
+
+    async def _speak_online(self):
+        self.player = StreamPlayer(self._first_sound, self._finished)
+        fetch = asyncio.ensure_future(self._fetch_all())
+        try:
+            if self.engine.local.ready:
+                # Don't leave the user waiting if Microsoft is slow or unreachable
+                t0 = time.time()
+                while ("first_byte" not in self.stats and not fetch.done()
+                       and time.time() - t0 < EDGE_WAIT):
+                    await asyncio.sleep(0.05)
+                if "first_byte" not in self.stats and not fetch.done():
+                    raise TimeoutError(f"no audio from Microsoft after {EDGE_WAIT}s")
+            await fetch
+        finally:
+            if not fetch.done():
+                fetch.cancel()
+        await self.done.wait()
+
+    async def _speak_offline(self):
+        from .local_voice import split_pieces
+        self.stats["conn"] = "offline"
+        self.player = StreamPlayer(self._first_sound, self._finished, mp3=False)
+        voice, rate = VOICE, RATE
+        for piece in split_pieces(self.text):
+            # each piece is made while the previous one plays
+            pcm = await self.loop.run_in_executor(
+                self.engine.local_pool, self.engine.local.synth, piece, voice, rate)
+            if "first_byte" not in self.stats:
+                self.stats["first_byte"] = time.time()
+            self.player.feed_pcm(pcm)
+        self.player.end()
+        await self.done.wait()
 
     async def _fetch_all(self):
         n = len(self.chunks)
@@ -579,18 +644,50 @@ class Engine:
         self.loop = asyncio.new_event_loop()
         self.voice = None
         self.task = None
+        self.edge_down_since = 0.0
         self.ready = threading.Event()
         threading.Thread(target=self._run, daemon=True, name="engine").start()
         self.ready.wait(10)
 
     def _run(self):
+        import concurrent.futures
+        from .local_voice import LocalVoice
         asyncio.set_event_loop(self.loop)
         self.voice = Voice(KEEP_WARM)
+        self.local = LocalVoice()
+        self.local_pool = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="offline")
         if KEEP_WARM:
             self.loop.create_task(self.voice.keep_warm_loop())
+        self.local.download_in_background()
+        if OFFLINE_ONLY:
+            self.preload_offline()
         self.ready.set()
         log("engine started")
         self.loop.run_forever()
+
+    # ---- choosing between Microsoft and the offline voice
+    def use_offline_first(self):
+        if not self.local.ready:
+            return False
+        if OFFLINE_ONLY:
+            return True
+        down = self.edge_down_since
+        # Recently failed, and Microsoft hasn't accepted a connection since
+        return bool(down) and self.voice.last_open_ok < down and time.time() - down < EDGE_RETRY_AFTER
+
+    def mark_edge_down(self):
+        self.edge_down_since = time.time()
+        self.preload_offline()
+
+    def preload_offline(self):
+        if self.local.ready:
+            self.local_pool.submit(self._try_load)
+
+    def _try_load(self):
+        try:
+            self.local.load()
+        except Exception as e:
+            log(f"offline voice failed to load: {e!r}")
 
     @property
     def busy(self):
@@ -600,7 +697,7 @@ class Engine:
         def start():
             if self.busy:
                 self.task.cancel()
-            r = Reading(self.voice, text, self.on_state)
+            r = Reading(self, text, self.on_state)
             self.task = self.loop.create_task(r.run())
         self.loop.call_soon_threadsafe(start)
 

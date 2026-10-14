@@ -36,6 +36,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
+          pip install --no-deps -r requirements-nodeps.txt
+
+      - name: Use numpy built for macOS 11 (the default one needs macOS 14)
+        if: runner.os == 'macOS'
+        run: |
+          pip download numpy==2.3.5 --no-deps --only-binary=:all: --python-version 3.12 \
+            --implementation cp --abi cp312 --platform macosx_11_0_${{ matrix.arch }} -d mac11
+          pip install --force-reinstall --no-deps mac11/numpy-*.whl
 
       - name: Build
         run: pyinstaller ReadAloud.spec --noconfirm --clean
@@ -45,8 +53,9 @@ jobs:
         shell: pwsh
         run: |
           $out = "$env:RUNNER_TEMP\selftest.json"
+          $env:READ_ALOUD_AUDIO_BACKEND = "null"   # CI machines have no speakers
           $p = Start-Process -FilePath "dist\ReadAloud.exe" -ArgumentList "--selftest","$out" -PassThru
-          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "app did not finish self-test" }
+          if (-not $p.WaitForExit(300000)) { $p.Kill(); throw "app did not finish self-test" }
           Get-Content $out
           python -c "import json,sys; r=json.load(open(r'$out')); sys.exit(0 if r.get('ok') else 1)"
 
@@ -54,9 +63,9 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           out="$RUNNER_TEMP/selftest.json"
-          "dist/Read Aloud.app/Contents/MacOS/Read Aloud" --selftest "$out" &
+          READ_ALOUD_AUDIO_BACKEND=null "dist/Read Aloud.app/Contents/MacOS/Read Aloud" --selftest "$out" &
           pid=$!
-          for i in $(seq 1 120); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          for i in $(seq 1 300); do kill -0 $pid 2>/dev/null || break; sleep 1; done
           kill $pid 2>/dev/null || true
           cat "$out"
           python -c "import json,sys; r=json.load(open('$out')); sys.exit(0 if r.get('ok') else 1)"
