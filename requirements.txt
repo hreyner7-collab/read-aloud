@@ -1,4 +1,4 @@
-edge-tts>=7.2
+edge-tts>=7.3.1   # 7.3 added the v2 access token Microsoft started requiring in Oct 2026
 miniaudio>=1.61
 aiohttp>=3.9
 certifi
