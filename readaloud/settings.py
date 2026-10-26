@@ -23,7 +23,7 @@ SPEEDS = [
 ]
 
 DEFAULTS = {"voice": "en-GB-SoniaNeural", "rate": "+0%", "x": None, "y": None,
-            "offline_only": False}
+            "offline_only": False, "auto_update": True}
 
 
 def load():

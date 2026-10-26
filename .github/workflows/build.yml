@@ -3,6 +3,7 @@ name: Build Read Aloud
 on:
   push:
     branches: [main]
+  pull_request:          # proposed fixes get the full test, but no release
   workflow_dispatch:
 
 permissions:
@@ -59,6 +60,13 @@ jobs:
           for f in "$dest"/libespeak-ng*.dylib; do rm -f "$f"; cp "$built" "$f"; done
           python scripts/check_macos_compat.py "$dest" ${{ matrix.arch }} 11.0
 
+      - name: Stamp the version number into the app
+        shell: bash
+        run: |
+          echo 'VERSION = "1.0.${{ github.run_number }}"' > readaloud/version.py
+          python -c "import importlib.metadata as m; print('edge-tts', m.version('edge-tts'))" > buildinfo-${{ matrix.artifact }}.txt
+          cat readaloud/version.py buildinfo-*.txt
+
       - name: Build
         run: pyinstaller ReadAloud.spec --noconfirm --clean
 
@@ -102,18 +110,35 @@ jobs:
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent "dist/Read Aloud.app" ${{ matrix.artifact }}
 
+      - name: Test the self-update (swap in a new copy and relaunch)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python scripts/test_update_swap.py dist/ReadAloud.exe ${{ matrix.artifact }}
+          else
+            python scripts/test_update_swap.py "dist/Read Aloud.app" ${{ matrix.artifact }}
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            buildinfo-${{ matrix.artifact }}.txt
 
   release:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+      - name: Checksums (the app checks these before installing an update)
+        run: |
+          sha256sum ReadAloud-Windows.exe ReadAloud-Mac.zip ReadAloud-Mac-Intel.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          echo "EDGE_TTS=$(head -1 buildinfo-ReadAloud-Windows.exe.txt | cut -d' ' -f2)" >> $GITHUB_ENV
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
@@ -123,7 +148,10 @@ jobs:
             ReadAloud-Windows.exe
             ReadAloud-Mac.zip
             ReadAloud-Mac-Intel.zip
+            SHA256SUMS.txt
           body: |
+            Already have Read Aloud? It updates itself: no need to download this again.
+
             **Windows:** download `ReadAloud-Windows.exe` and double-click it.
             **Mac with Apple Silicon (M1 or newer):** download `ReadAloud-Mac.zip`.
             **Mac with Intel chip (2015-2020, macOS 11 Big Sur or newer):** download `ReadAloud-Mac-Intel.zip`.
@@ -131,3 +159,5 @@ jobs:
             On Mac, open the zip and drag **Read Aloud** into Applications.
 
             See the README for first-launch steps (unsigned app warnings).
+
+            <sub>Built with edge-tts ${{ env.EDGE_TTS }}</sub>

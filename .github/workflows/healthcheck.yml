@@ -1,0 +1,95 @@
+name: Daily health check
+
+# Every day: check Microsoft's voices still work with the app.
+# - Newer edge-tts available and working  -> rebuild + release (apps update themselves)
+# - Current release broken, no fix found  -> open a "health-check" issue for a human/Claude
+# - All good again                        -> close that issue
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # 06:17 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Which edge-tts did the current release use?
+        run: |
+          released=$(gh api repos/${{ github.repository }}/releases/latest --jq .body \
+            | grep -oE 'Built with edge-tts [0-9.]+' | grep -oE '[0-9.]+$' || true)
+          latest=$(curl -s https://pypi.org/pypi/edge-tts/json | python -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+          echo "RELEASED=$released" >> $GITHUB_ENV
+          echo "LATEST=$latest" >> $GITHUB_ENV
+          echo "release built with edge-tts '${released:-unknown}', newest on PyPI is $latest"
+
+      - name: Test the current release's edge-tts
+        if: env.RELEASED != ''
+        run: |
+          python -m venv rel && rel/bin/pip install -q "edge-tts==$RELEASED" aiohttp certifi
+          rel/bin/python scripts/healthcheck.py | tee current.json
+
+      - name: Test the newest edge-tts
+        run: |
+          python -m venv new && new/bin/pip install -q -U edge-tts aiohttp certifi
+          new/bin/python scripts/healthcheck.py | tee newest.json
+
+      - name: Decide
+        id: decide
+        run: |
+          python - <<'EOF'
+          import json, os
+          load = lambda p: json.load(open(p)) if os.path.exists(p) else None
+          cur, new = load("current.json"), load("newest.json")
+          released, latest = os.environ.get("RELEASED"), os.environ["LATEST"]
+          cur_ok = cur["ok"] if cur else None
+          rebuild = bool(new and new["ok"] and (released != latest or cur_ok is False))
+          broken = bool(new and not new["ok"] and not cur_ok)
+          out = open(os.environ["GITHUB_OUTPUT"], "a")
+          out.write(f"rebuild={'true' if rebuild else 'false'}\n")
+          out.write(f"broken={'true' if broken else 'false'}\n")
+          out.write(f"healthy={'true' if (cur_ok or (new and new['ok'])) else 'false'}\n")
+          summary = (f"Current release (edge-tts {released or 'unknown'}): {cur}\n\n"
+                     f"Newest edge-tts {latest}: {new}\n")
+          open("summary.md", "w").write(summary)
+          print(summary, "rebuild:", rebuild, "broken:", broken)
+          EOF
+
+      - name: Rebuild and release with the newer edge-tts
+        if: steps.decide.outputs.rebuild == 'true'
+        run: gh workflow run build.yml --ref main
+
+      - name: Open or update the health-check issue
+        if: steps.decide.outputs.broken == 'true'
+        run: |
+          gh label create health-check --color D93F0B --force >/dev/null 2>&1 || true
+          existing=$(gh issue list --label health-check --state open --json number --jq '.[0].number')
+          body="Microsoft's voices are failing with both the released and the newest edge-tts.
+          The weekly Claude task (or you) needs to work out a fix.
+
+          $(cat summary.md)"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "Health check: Microsoft voices failing" --label health-check --body "$body"
+          fi
+
+      - name: Close the health-check issue if fixed
+        if: steps.decide.outputs.healthy == 'true'
+        run: |
+          for n in $(gh issue list --label health-check --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Health check passing again. $(cat summary.md)"
+          done

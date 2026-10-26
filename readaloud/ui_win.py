@@ -174,6 +174,12 @@ class WinApp:
             u.ShowWindow(self.hwnd, 4)  # SW_SHOWNOACTIVATE
         self.root.after(500, self._keep_visible)
 
+    def quit_app(self):
+        self.root.destroy()
+
+    def update_status_changed(self):
+        pass  # the menu is rebuilt each time it opens
+
     def quit(self):
         try:
             self.controller.engine.stop()
@@ -225,6 +231,15 @@ class WinApp:
             m.add_checkbutton(label="Start with Windows", variable=self.login_var,
                               command=lambda: st.set_login_item(self.login_var.get()))
         m.add_command(label="How to use", command=lambda: self.welcome(force=True))
+        m.add_separator()
+        up = self.controller.updater
+        m.add_command(label=up.status_text(), state="disabled")
+        if up.supported:
+            m.add_command(label="Install update now" if up.state == "ready" else "Check for updates",
+                          command=self.controller.check_for_updates)
+            self.auto_update_var = tk.BooleanVar(value=bool(self.settings.get("auto_update", True)))
+            m.add_checkbutton(label="Update automatically", variable=self.auto_update_var,
+                              command=lambda: self.controller.set_auto_update(self.auto_update_var.get()))
         m.add_separator()
         m.add_command(label="Quit Read Aloud", command=self.quit)
         self.menu = m

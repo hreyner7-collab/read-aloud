@@ -6,6 +6,11 @@ from .engine import Engine, log
 
 # Button states: idle, grabbing, loading, speaking, empty, error, permission
 BUSY = ("grabbing", "loading", "speaking")
+
+
+def selftest_mode():
+    import sys
+    return "--selftest" in sys.argv
 FLASH = ("empty", "error", "permission")  # shown briefly, then back to idle
 
 
@@ -22,6 +27,43 @@ class Controller:
         eng.RATE = settings["rate"]
         eng.OFFLINE_ONLY = bool(settings.get("offline_only"))
         self.engine = Engine(self._engine_state)
+        from .updater import Updater
+        self.updater = Updater(on_change=self._update_changed,
+                               on_ready=lambda: self.post(self._install_when_idle))
+        self.updater.auto = bool(settings.get("auto_update", True))
+        if not selftest_mode():
+            self.updater.start_background()
+
+    # ---- self-update
+    def _update_changed(self):
+        if self.view and hasattr(self.view, "update_status_changed"):
+            self.post(self.view.update_status_changed)
+
+    def _install_when_idle(self):
+        """Install a downloaded update, but never in the middle of a read."""
+        if not self.settings.get("auto_update", True):
+            return  # user installs it from the menu
+        if self.state in BUSY:
+            self.view.later(5, self._install_when_idle)
+            return
+        self.install_update()
+
+    def install_update(self):
+        if self.state in BUSY:
+            self.engine.stop()
+        self.updater.install(self.view.quit_app)
+
+    def check_for_updates(self):
+        if self.updater.state == "ready":
+            self.install_update()
+        else:
+            self.updater.check_now()
+
+    def set_auto_update(self, on):
+        self.settings["auto_update"] = self.updater.auto = bool(on)
+        self._save()
+        if on and self.updater.state == "ready":
+            self._install_when_idle()
 
     # called from engine threads
     def _engine_state(self, s):

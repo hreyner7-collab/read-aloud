@@ -190,6 +190,14 @@ class MenuHandler(NSObject):
         st.set_login_item(not st.login_item_enabled())
         self.app.refresh_menu()
 
+    def checkUpdates_(self, sender):
+        self.app.controller.check_for_updates()
+        self.app.refresh_menu()
+
+    def toggleAutoUpdate_(self, sender):
+        self.app.controller.set_auto_update(not self.app.settings.get("auto_update", True))
+        self.app.refresh_menu()
+
     def showHelp_(self, sender):
         self.app.welcome(force=True)
 
@@ -305,6 +313,15 @@ class MacApp:
             item("Open at Login", "toggleLogin:", on=st.login_item_enabled())
         item("How to use", "showHelp:")
         m.addItem_(NSMenuItem.separatorItem())
+        up = self.controller.updater
+        status = item(up.status_text(), None)
+        status.setEnabled_(False)
+        if up.supported:
+            item("Install update now" if up.state == "ready" else "Check for updates",
+                 "checkUpdates:")
+            item("Update automatically", "toggleAutoUpdate:",
+                 on=bool(self.settings.get("auto_update", True)))
+        m.addItem_(NSMenuItem.separatorItem())
         item("Quit Read Aloud", "quit:")
 
     # ---- first run
@@ -333,6 +350,12 @@ class MacApp:
         else:
             AppHelper.callLater(0.5, self._first_run)
         AppHelper.runEventLoop(installInterrupt=False)
+
+    def quit_app(self):
+        NSApp.terminate_(None)
+
+    def update_status_changed(self):
+        pass  # the menu is rebuilt each time it opens
 
     def _first_run(self):
         self.welcome()

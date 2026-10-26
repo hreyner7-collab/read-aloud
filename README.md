@@ -22,6 +22,14 @@ Go to **[Releases → Latest](../../releases/latest)** and download:
 
 Not sure which Mac you have? Click the Apple menu → **About This Mac**. If it says **Chip: Apple M…**, it's Apple Silicon. If it says **Processor: … Intel**, it's Intel.
 
+## Updates
+
+Read Aloud **updates itself**. It checks for a new version when it opens and every few hours after that, downloads it in the background, checks it against the release's fingerprints (`SHA256SUMS.txt`), and swaps it in the next time it isn't speaking. The button disappears for a second and comes back in the same spot. Right-click the button to see your version, **Check for updates** now, or switch off **Update automatically**.
+
+On a Mac, macOS may ask you to switch Read Aloud back on under **Privacy & Security → Accessibility** after an update, because each build is unsigned.
+
+A daily check on GitHub makes sure Microsoft's voices still work. When the library the app relies on (edge-tts) gets a fix, a new version is built, tested on Windows and both kinds of Mac, and published automatically.
+
 ## First launch
 
 These builds aren't signed with a paid Apple or Microsoft developer certificate, so both systems show a warning the first time. You only have to do this once.
