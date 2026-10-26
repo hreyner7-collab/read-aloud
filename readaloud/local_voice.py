@@ -78,6 +78,8 @@ class LocalVoice:
     def __init__(self):
         self.kokoro = None
         self.lock = threading.Lock()
+        self._dl_lock = threading.Lock()
+        self._bg_started = False
         self.download_state = "missing"   # missing / downloading / ready / failed
         self.progress = 0.0
         if self._model_ok(quick=True):
@@ -107,23 +109,35 @@ class LocalVoice:
             "failed": "Offline voice: download failed (will retry)",
         }.get(self.download_state, "Offline voice: not downloaded yet")
 
-    def download_in_background(self, delay=5):
-        if self.ready or self.download_state == "downloading":
+    def download_in_background(self, delay=5, retry_every=600):
+        if self.ready or self._bg_started:
             return
-        threading.Thread(target=self._download, args=(delay,), daemon=True,
-                         name="kokoro-download").start()
+        self._bg_started = True
+
+        def loop():
+            time.sleep(delay)
+            while not self.ready:          # e.g. first opened with no internet
+                self._download()
+                if not self.ready:
+                    time.sleep(retry_every)
+        threading.Thread(target=loop, daemon=True, name="kokoro-download").start()
 
     def download(self):
-        """Blocking download (used by the self-test)."""
-        self._download(0)
+        """Blocking download (used by the self-test). Waits for one already running."""
+        self._download()
         return self.ready
 
-    def _download(self, delay):
-        time.sleep(delay)
-        if self.ready:
-            return
+    def _download(self):
+        # One download at a time; a second caller waits for the first and reuses it
+        with self._dl_lock:
+            if self.ready or self._model_ok(quick=True):
+                self.download_state = "ready"
+                return
+            self._download_locked()
+
+    def _download_locked(self):
         self.download_state = "downloading"
-        part = model_path() + ".part"
+        part = model_path() + f".{os.getpid()}.part"
         try:
             import ssl
             try:
