@@ -1,11 +1,15 @@
 """Only a fully described, verified build from the download site can arrive."""
 import hashlib
 import json
+import sys
 import types
 
 import pytest
 
 from readaloud import updater as U
+
+windows_only = pytest.mark.skipif(
+    sys.platform != "win32", reason="Windows .exe install target")
 
 BASE = "https://read-aloud-kvtn6ncvzmt.qoder.website/manifest.json"
 GOOD = b"pretend this is a new build"
@@ -212,12 +216,14 @@ def test_a_complete_staged_file_is_reused_without_another_download(tmp_path):
 
 # ---------------------------------------------------------------- staging
 
+@windows_only
 def test_a_staged_newer_build_is_found_and_verified(tmp_path, monkeypatch):
     art = staged(tmp_path, monkeypatch)
     found = U.load_staged(current="1.0.12")
     assert found is not None and found.path == art.path
 
 
+@windows_only
 def test_an_old_or_damaged_staged_build_is_discarded(tmp_path, monkeypatch):
     art = staged(tmp_path, monkeypatch, version="1.0.12")
     assert U.load_staged(current="1.0.12") is None
@@ -295,6 +301,7 @@ def test_install_swaps_only_the_verified_staged_file(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- leftovers
 
+@windows_only
 def test_cleanup_keeps_the_staged_update_and_restores_a_missing_app(tmp_path, monkeypatch):
     folder = tmp_path / "update"
     folder.mkdir()

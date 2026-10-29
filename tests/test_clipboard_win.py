@@ -1,9 +1,13 @@
 """Windows clipboard safety: byte-identical restore, no Ctrl+C without a snapshot."""
 import ctypes
+import sys
 
 import pytest
 
 from readaloud import selection_win as sw
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32", reason="Windows clipboard and wide-character API")
 
 
 class FakeWin32:
