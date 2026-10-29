@@ -18,10 +18,10 @@ Use the public **[Read Aloud download website](https://read-aloud-kvtn6ncvzmt.qo
 | Computer | Version 1.0.13 |
 |---|---|
 | Windows 10 / 11, 64-bit | `ReadAloud-1.0.13.exe` |
-| Mac with Apple Silicon (M1 or newer) | Native build not yet available |
-| Mac with an Intel chip | Native build not yet available |
+| Mac with Apple Silicon (M1 or newer) | `ReadAloud-Mac.zip` (macOS 11+) |
+| Mac with an Intel chip | `ReadAloud-Mac-Intel.zip` (macOS 11+) |
 
-Both Mac build definitions are present, but native builds and packaged tests require their respective macOS hosts. This release has not been pushed, tagged or published on GitHub.
+Both Mac builds are produced and exercised on Apple's macOS runners: the packaged app launches, reads real speech online and offline, falls back to the offline voice, quits from the Dock, and only one button runs at a time. They are unsigned and not notarized and were not tried on a physical Mac before release. The in-app update feed publishes only the Windows build, so Mac updates are manual downloads from the website.
 
 Not sure which Mac you have? Click the Apple menu → **About This Mac**. If it says **Chip: Apple M…**, it's Apple Silicon. If it says **Processor: … Intel**, it's Intel.
 
@@ -38,7 +38,7 @@ Older builds using the previous GitHub update feed need the website download onc
 These builds aren't signed with a paid Apple or Microsoft developer certificate, so both systems show a warning the first time. You only have to do this once.
 
 ### Windows
-1. Double-click `ReadAloud-Windows.exe`.
+1. Double-click `ReadAloud-1.0.13.exe`.
 2. If you see **"Windows protected your PC"**, click **More info → Run anyway**.
 3. The round button appears on the right of your screen. Right-click it and tick **Start with Windows** if you want it there every time.
 
