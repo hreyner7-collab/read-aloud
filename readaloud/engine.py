@@ -599,10 +599,20 @@ class Engine:
     def set_offline_only(self, on):
         global OFFLINE_ONLY
         OFFLINE_ONLY = bool(on)
-        if on and self.voice is not None:
-            self.voice.set_keep_warm(False)
-        elif self.voice is not None:
-            self.voice.refill()
+        if on:
+            self.preload_offline()          # ready the model while the menu closes
+
+        def apply():
+            if self.voice is None:
+                return
+            if OFFLINE_ONLY:
+                self.voice.set_keep_warm(False)   # stop keeping cloud sockets warm
+            else:
+                self.voice.refill()
+        try:
+            self.loop.call_soon_threadsafe(apply)  # the pool lives on this loop
+        except RuntimeError:
+            pass                            # engine loop already closed
 
     # ---- offline voice
     def begin_read(self):

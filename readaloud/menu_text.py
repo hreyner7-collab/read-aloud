@@ -4,8 +4,8 @@ from . import settings as _settings
 
 def voice_title(settings):
     current = settings.get("voice")
-    return "Voice · " + next((label for vid, label in _settings.VOICES if vid == current),
-                             "Sonia")
+    label = next((label for vid, label in _settings.VOICES if vid == current), "Sonia")
+    return "Voice · " + label + (" · offline only" if settings.get("offline_only") else "")
 
 
 def speed_title(settings):

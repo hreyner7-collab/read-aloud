@@ -49,7 +49,8 @@ def test_windows(exe):
     u.FindWindowW.restype = wintypes.HWND
     u.GetWindowLongW.restype = ctypes.c_long
     seed_settings(os.path.join(os.environ["APPDATA"], "Read Aloud"))
-    p = subprocess.Popen([exe])
+    env = dict(os.environ, READ_ALOUD_NO_INSTALL="1")  # run the built copy itself
+    p = subprocess.Popen([exe], env=env)
     hwnd = None
     for _ in range(40):
         time.sleep(0.5)

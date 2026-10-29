@@ -69,7 +69,9 @@ jobs:
       - name: Stamp the version number into the app
         shell: bash
         run: |
-          echo 'VERSION = "1.0.${{ github.run_number }}"' > readaloud/version.py
+          # This branch ships a fixed release number; the release itself is
+          # assembled by hand so the tag does not invent 1.0.<run_number>.
+          echo 'VERSION = "1.0.14"' > readaloud/version.py
           python -c "import importlib.metadata as m; print('edge-tts', m.version('edge-tts'))" > buildinfo-${{ matrix.artifact }}.txt
           cat readaloud/version.py buildinfo-*.txt
 
@@ -99,6 +101,10 @@ jobs:
       - name: Test closing it like a normal app (taskbar / Dock)
         if: runner.os == 'Windows'
         run: python scripts/test_close.py dist\ReadAloud.exe
+
+      - name: Test installing once and updating in place (Windows)
+        if: runner.os == 'Windows'
+        run: python scripts/test_install.py dist\ReadAloud.exe
 
       - name: Test closing it like a normal app (Dock > Quit)
         if: runner.os == 'macOS'
@@ -169,7 +175,7 @@ jobs:
 
   release:
     needs: build
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

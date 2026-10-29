@@ -56,6 +56,22 @@ def test_offline_status_starts_with_a_capital():
     assert mt.offline_status(Controller()) == "Offline voice ready"
 
 
+def test_voice_title_shows_when_offline_only_is_on():
+    voice_id, voice_label = st.VOICES[0]
+    assert mt.voice_title({"voice": voice_id}) == "Voice · " + voice_label
+    assert mt.voice_title({"voice": voice_id, "offline_only": True}) == (
+        "Voice · " + voice_label + " · offline only")
+
+
+def test_windows_offline_rows_put_the_switch_last():
+    src = source("readaloud/ui_win.py")
+    menu = src[src.index("self.offline_var = tk.BooleanVar"):
+               src.index("m.add_cascade(label=mt.voice_title")]
+    assert menu.index("mt.offline_status(controller)") < menu.index("mt.OFFLINE_LABEL")
+    assert menu.index("mt.DOWNLOAD_LABEL") < menu.index("mt.OFFLINE_LABEL")
+    assert 'not bool(self.settings.get("offline_only"))' in menu
+
+
 def test_mac_menu_selectors_match_their_python_methods():
     src = source("readaloud/ui_mac.py")
     for selector in ("retry:", "clearCache:", "toggleDiskCache:", "toggleAutoUpdate:"):

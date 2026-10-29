@@ -167,9 +167,30 @@ class Controller:
         self._save()
 
     def set_offline_only(self, on):
-        eng.OFFLINE_ONLY = self.settings["offline_only"] = bool(on)
+        on = bool(on)
+        eng.OFFLINE_ONLY = self.settings["offline_only"] = on
         self.engine.set_offline_only(on)
         self._save()
+        log("voice mode: offline only" if on else
+            "voice mode: online, with the offline voice as backup")
+        local = self.engine.local
+        missing = local is not None and not local.ready
+        if self.state in BUSY:
+            # The read in progress began in the other mode; stop it so the next
+            # click uses the voice the user just chose.
+            self.engine.stop()
+            self._set("idle")
+        if on and missing:
+            self._set("offline_missing")     # orange: download it, then click
+            if self.view:
+                self.view.later(2.5, self._offline_missing_done)
+        elif self.view:
+            self.view.note("Offline voice only - click the button to read" if on
+                           else "Online voice (offline voice as backup)")
+
+    def _offline_missing_done(self):
+        if self.state == "offline_missing":
+            self._set("idle")
 
     def download_offline(self):
         local = self.engine.local

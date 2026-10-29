@@ -43,6 +43,12 @@ from .version import VERSION
 MANIFEST_URL = os.environ.get(
     "READ_ALOUD_UPDATE_MANIFEST",
     "https://read-aloud-kvtn6ncvzmt.qoder.website/manifest.json")
+# The site hosts the manifest; the 50 MB builds live on this project's GitHub
+# releases.  Both are named here so a tampered manifest cannot point anywhere
+# else, and GitHub's own asset host is the only redirect we follow.
+GITHUB_RELEASE = "https://github.com/hreyner7-collab/read-aloud/releases/download/"
+GITHUB_ASSET_HOSTS = ("release-assets.githubusercontent.com",
+                      "objects.githubusercontent.com")
 CHECK_EVERY = 6 * 3600
 DAILY_HOUR = 12
 MAX_MANIFEST_BYTES = 256 * 1024
@@ -119,6 +125,34 @@ def install_target():
 
 # ------------------------------------------------------------------ manifest
 
+_GITHUB_RELEASE_PATH = urllib.parse.urlsplit(GITHUB_RELEASE).path
+
+
+def _is_project_release(url):
+    """True only for an asset URL on this project's own GitHub release page."""
+    split = urllib.parse.urlsplit(url)
+    if (split.scheme != "https" or split.netloc != "github.com"
+            or split.query or split.fragment):
+        return False
+    path = split.path
+    if not path.startswith(_GITHUB_RELEASE_PATH):
+        return False
+    tag, _, asset = path[len(_GITHUB_RELEASE_PATH):].partition("/")
+    return bool(tag and asset and "/" not in asset
+                and tag not in (".", "..") and asset not in (".", ".."))
+
+
+def _artifact_origin_ok(url, base_url=MANIFEST_URL):
+    """An artifact comes from the update site or this project's release page."""
+    split = urllib.parse.urlsplit(url)
+    base = urllib.parse.urlsplit(str(base_url))
+    if split.scheme != "https" or not split.netloc or "@" in split.netloc:
+        return False
+    if base.scheme == "https" and base.netloc and split.netloc == base.netloc:
+        return True
+    return _is_project_release(url)
+
+
 def parse_manifest(payload, key, base_url=MANIFEST_URL):
     """Validate the site manifest strictly and return this machine's artifact."""
     if not isinstance(payload, dict):
@@ -143,9 +177,8 @@ def parse_manifest(payload, key, base_url=MANIFEST_URL):
         raise UpdateError("update manifest is not a plain https URL")
     path = str(entry.get("path") or "")
     url = urllib.parse.urljoin(str(base_url), path)
-    split = urllib.parse.urlsplit(url)
-    if split.scheme != "https" or split.netloc != base.netloc:
-        raise UpdateError("artifact is not on the update site")
+    if not _artifact_origin_ok(url, base_url):
+        raise UpdateError("artifact is not on the update site or its release page")
 
     name = str(entry.get("name") or "")
     if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,90}", name)
@@ -314,7 +347,14 @@ def _ssl_context():
 class _SameSiteRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         before, after = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
-        if after.scheme != "https" or after.netloc != before.netloc:
+        if after.scheme != "https" or not after.netloc or "@" in after.netloc:
+            raise UpdateError("update redirect left the https download site")
+        # GitHub answers a release asset with a signed link on its own file
+        # host; only our release page (or that host) may lead there.
+        asset_hop = (after.netloc in GITHUB_ASSET_HOSTS
+                     and (before.netloc in GITHUB_ASSET_HOSTS
+                          or _is_project_release(req.full_url)))
+        if after.netloc != before.netloc and not asset_hop:
             raise UpdateError("update redirect left the https download site")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 

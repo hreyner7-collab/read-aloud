@@ -42,7 +42,10 @@ HELP = ("Select text in any app, then click the round button to hear it read alo
         "If part of a sentence could not be read, a small orange dot stays on the "
         "button. The right-click menu shows the reason and has Try again.\n\n"
         "Offline voice only works without internet once its model has been "
-        "downloaded (menu > Voice > Download offline voice).")
+        "downloaded (menu > Voice > Download offline voice).\n\n"
+        "Read Aloud keeps one copy in your user folder. Double-clicking a newer "
+        "download updates that copy in place, so you can delete the file you "
+        "downloaded afterwards.")
 
 
 def _asset(name):
@@ -129,6 +132,13 @@ class WinApp:
         warning = self.controller.warning if state == "idle" else ""
         self._tip_text = detail or warning or TIPS.get(state, "") or TIP_IDLE
         self._tip_hide()
+
+    def note(self, text):
+        """Show a brief confirmation beside the button after a menu choice."""
+        self._tip_hide()
+        self._tip_text = text
+        self._tip_show()
+        self.root.after(2200, self._tip_hide)
 
     def _draw(self):
         c, s = self.canvas, self.size
@@ -271,14 +281,17 @@ class WinApp:
             self.hwnd = hwnd
             r.withdraw()             # re-show so the taskbar picks up the new style
             r.after(50, r.deiconify)
-            r.after(1000, self._keep_visible)
+            r.after(150, self._keep_visible)
 
     def _keep_visible(self):
         """Clicking the taskbar button could minimise a borderless window with no
-        way back - so if that happens, put the button straight back."""
+        way back, so put the button straight back - and re-assert always-on-top,
+        which the withdraw/deiconify above drops."""
         u = ctypes.windll.user32
-        if self.hwnd and u.IsIconic(self.hwnd):
-            u.ShowWindow(self.hwnd, 4)  # SW_SHOWNOACTIVATE
+        if self.hwnd:
+            if u.IsIconic(self.hwnd):
+                u.ShowWindow(self.hwnd, 4)  # SW_SHOWNOACTIVATE
+            u.SetWindowPos(self.hwnd, -1, 0, 0, 0, 0, 0x0013)  # TOPMOST, no move/size/activate
         self.root.after(500, self._keep_visible)
 
     def quit_app(self):
@@ -350,13 +363,18 @@ class WinApp:
                                    command=lambda: controller.set_voice(self.voice_var.get()))
         self.offline_var = tk.BooleanVar(value=bool(self.settings.get("offline_only")))
         voices.add_separator()
-        voices.add_checkbutton(label=mt.OFFLINE_LABEL, variable=self.offline_var,
-                               command=lambda: controller.set_offline_only(self.offline_var.get()))
         voices.add_command(label=mt.offline_status(controller), state="disabled")
         local = controller.engine.local
         if local is not None and not local.ready:
             voices.add_command(label=mt.DOWNLOAD_LABEL,
                                command=controller.download_offline)
+        voices.add_separator()
+        # The mode switch is the last row: a disabled status line sitting under
+        # it made people click the wrong thing and think the switch did nothing.
+        voices.add_checkbutton(
+            label=mt.OFFLINE_LABEL, variable=self.offline_var,
+            command=lambda: controller.set_offline_only(
+                not bool(self.settings.get("offline_only"))))
         m.add_cascade(label=mt.voice_title(self.settings), menu=voices)
 
         speeds = make(m)

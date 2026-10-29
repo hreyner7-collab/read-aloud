@@ -154,6 +154,30 @@ def test_a_non_https_manifest_is_rejected():
         U.parse_manifest(manifest(), "windows", base_url="http://example.com/m.json")
 
 
+def test_this_projects_release_asset_is_allowed_for_the_windows_exe():
+    url = U.GITHUB_RELEASE + "v1.0.14/ReadAloud-Windows.exe"
+    payload = manifest()
+    payload["artifacts"]["windows"].update(path=url, name="ReadAloud-Windows.exe")
+    art = U.parse_manifest(payload, "windows")
+    assert art.url == url and art.name == "ReadAloud-Windows.exe"
+
+
+@pytest.mark.parametrize("path", [
+    "https://github.com/someone-else/read-aloud/releases/download/v1.0.14/x.exe",
+    "https://github.com/hreyner7-collab/read-aloud/releases/latest",
+    U.GITHUB_RELEASE + "v1.0.14/../../other.exe",
+    U.GITHUB_RELEASE + "v1.0.14/nested/ReadAloud-Windows.exe",
+    U.GITHUB_RELEASE + "v1.0.14/ReadAloud-Windows.exe?raw=1",
+    "http://github.com/hreyner7-collab/read-aloud/releases/download/v1.0.14/x.exe",
+    "https://github.com.evil.example/hreyner7-collab/read-aloud/releases/download/x/y.exe",
+])
+def test_other_release_urls_are_still_rejected(path):
+    payload = manifest()
+    payload["artifacts"]["windows"]["path"] = path
+    with pytest.raises(U.UpdateError):
+        U.parse_manifest(payload, "windows")
+
+
 @pytest.mark.parametrize("url", ["http://read-aloud-kvtn6ncvzmt.qoder.website/new",
                                   "https://other.example/new"])
 def test_update_redirect_cannot_leave_the_https_site(url):
@@ -167,6 +191,29 @@ def test_same_site_https_redirect_is_allowed():
     url = BASE.replace("manifest.json", "files/current.exe")
     request = U._SameSiteRedirect().redirect_request(Request(BASE), None, 302, "", {}, url)
     assert request.full_url == url
+
+
+def test_a_project_release_follows_githubs_asset_redirect():
+    from urllib.request import Request
+    release = U.GITHUB_RELEASE + "v1.0.14/ReadAloud-Windows.exe"
+    target = ("https://release-assets.githubusercontent.com/github-production-"
+              "release-asset/1abc?jwt=token")
+    request = U._SameSiteRedirect().redirect_request(
+        Request(release), None, 302, "", {}, target)
+    assert request.full_url == target
+
+
+@pytest.mark.parametrize("origin,target", [
+    (BASE, "https://release-assets.githubusercontent.com/x"),
+    (BASE, "https://github.com/hreyner7-collab/read-aloud/releases/download/x/y.exe"),
+    (U.GITHUB_RELEASE + "v1.0.14/x.exe", "https://evil.example/x"),
+    (U.GITHUB_RELEASE + "v1.0.14/x.exe", "http://release-assets.githubusercontent.com/x"),
+    (U.GITHUB_RELEASE + "v1.0.14/x.exe", "https://release-assets.githubusercontent.com.evil.example/x"),
+])
+def test_other_redirects_are_refused(origin, target):
+    from urllib.request import Request
+    with pytest.raises(U.UpdateError):
+        U._SameSiteRedirect().redirect_request(Request(origin), None, 302, "", {}, target)
 
 
 @pytest.mark.parametrize("name", ["../outside.exe", "C:/outside.exe", "new.zip"])

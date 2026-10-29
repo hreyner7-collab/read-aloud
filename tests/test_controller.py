@@ -21,6 +21,7 @@ class FakeEngine:
         self.gen = 0
         self.speaks = []
         self.stops = 0
+        self.offline_calls = []
         self.local = None
         self.cache = None
 
@@ -34,7 +35,7 @@ class FakeEngine:
         self.stops += 1
 
     def set_offline_only(self, on):
-        pass
+        self.offline_calls.append(on)
 
 
 class FakeUpdater:
@@ -79,9 +80,13 @@ class FakeView:
     def __init__(self):
         self.shown = []
         self.later_calls = []
+        self.notes = []
 
     def show(self, state, detail=""):
         self.shown.append((state, detail))
+
+    def note(self, text):
+        self.notes.append(text)
 
     def later(self, seconds, fn):
         self.later_calls.append((seconds, fn))
@@ -234,3 +239,47 @@ def test_download_offline_without_engine_local_is_safe(made):
     c.engine.local = None
     c.download_offline()             # must not raise
     assert c.offline_status().startswith("Offline voice")
+
+
+def test_offline_only_switch_applies_and_confirms(made, monkeypatch):
+    from readaloud import settings as st
+    c, clock, sel, _ = made
+    monkeypatch.setattr(C.eng, "OFFLINE_ONLY", False)
+    monkeypatch.setattr(st, "save", lambda s: None)
+    c.engine.local = types.SimpleNamespace(ready=True)
+    c.set_offline_only(True)
+    assert c.settings["offline_only"] is True
+    assert C.eng.OFFLINE_ONLY is True
+    assert c.engine.offline_calls == [True]
+    assert c.view.notes[-1].startswith("Offline voice only")
+    c.set_offline_only(False)
+    assert c.settings["offline_only"] is False
+    assert C.eng.OFFLINE_ONLY is False
+    assert c.engine.offline_calls == [True, False]
+    assert c.view.notes[-1].startswith("Online voice")
+
+
+def test_offline_only_without_the_model_shows_what_to_do(made, monkeypatch):
+    from readaloud import settings as st
+    c, clock, sel, _ = made
+    monkeypatch.setattr(C.eng, "OFFLINE_ONLY", False)
+    monkeypatch.setattr(st, "save", lambda s: None)
+    c.engine.local = types.SimpleNamespace(ready=False)
+    c.set_offline_only(True)
+    assert C.eng.OFFLINE_ONLY is True
+    assert c.state == "offline_missing"
+    assert c.view.later_calls[-1][0] == 2.5
+    c.view.later_calls[-1][1]()
+    assert c.state == "idle"
+
+
+def test_changing_the_voice_mode_stops_a_read_in_the_old_mode(made, monkeypatch):
+    from readaloud import settings as st
+    c, clock, sel, _ = made
+    monkeypatch.setattr(C.eng, "OFFLINE_ONLY", False)
+    monkeypatch.setattr(st, "save", lambda s: None)
+    c.engine.local = types.SimpleNamespace(ready=True)
+    c._set("speaking")
+    c.set_offline_only(True)
+    assert c.engine.stops == 1
+    assert c.state == "idle"

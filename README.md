@@ -8,16 +8,16 @@ A small floating button that reads out any text you select, using Microsoft's na
 - Right-click it to change the voice (British, American or Australian, male or female) or the speed.
 - **Speech streams as audio arrives**, sentence by sentence, without waiting for the whole passage. Decoded audio is kept in RAM so repeat reads can skip the network and decoder. The website publishes callback timings separately from audible latency; no 33× or 100× audible-speed improvement is claimed. Playback itself is always real time: a two-minute passage takes two minutes to speak.
 - No account or sign-up.
-- **Built-in offline voice.** If Microsoft's voices can't be reached (no internet, or Microsoft changes something), the button switches to an offline voice ([Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)) that runs on your own computer. You can also pick **Voice → Offline voice only**. The offline voice downloads once (177 MB) in the background the first time you open the app, and the menu shows its progress.
+- **Built-in offline voice.** If Microsoft's voices can't be reached (no internet, or Microsoft changes something), the button switches to an offline voice ([Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)) that runs on your own computer. You can also pick **Voice → Offline voice only**: the menu title then says "offline only", a read in progress stops so the next click uses it, and the button turns orange with a prompt if the 177 MB voice hasn't downloaded yet. The offline voice downloads once in the background the first time you open the app, and the menu shows its progress.
 - **Nothing is ever dropped in silence.** Every sentence is written down in a ledger as spoken, partially heard or skipped. If part of a read was lost, the button says so and the right-click menu tells you which part — it does not quietly stop.
 
 ## Download
 
 Use the public **[Read Aloud download website](https://read-aloud-kvtn6ncvzmt.qoder.website)**. No account is required.
 
-| Computer | Version 1.0.13 |
+| Computer | Version 1.0.14 |
 |---|---|
-| Windows 10 / 11, 64-bit | `ReadAloud-1.0.13.exe` |
+| Windows 10 / 11, 64-bit | `ReadAloud-1.0.14.exe` |
 | Mac with Apple Silicon (M1 or newer) | `ReadAloud-Mac.zip` (macOS 11+) |
 | Mac with an Intel chip | `ReadAloud-Mac-Intel.zip` (macOS 11+) |
 
@@ -27,7 +27,11 @@ Not sure which Mac you have? Click the Apple menu → **About This Mac**. If it 
 
 ## Updates
 
-Read Aloud checks the public website's manifest shortly after launch and every six hours while open. With **Updates → Update automatically** enabled, it also registers one daily noon check: a least-privilege Windows task or a per-user Mac LaunchAgent. The daily check only stages an update; the app installs it when idle or at its next launch. HTTPS origin, file size and SHA-256 are checked before installation. Disabling automatic updates removes the daily task. Keep the app in a permanent folder so the task can find it.
+Read Aloud checks the public website's manifest shortly after launch and every six hours while open. With **Updates → Update automatically** enabled, it also registers one daily noon check: a least-privilege Windows task or a per-user Mac LaunchAgent. The daily check only stages an update; the app installs it when idle or at its next launch. HTTPS origin, file size and SHA-256 are checked before installation. Disabling automatic updates removes the daily task.
+
+On Windows the download is a one-time installer: it copies itself to `%LOCALAPPDATA%\Programs\Read Aloud\ReadAloud.exe`, adds a Start-menu shortcut, and starts that copy. Updates replace that single file in place, so there is only ever one Read Aloud and the file you downloaded can be deleted. A newer download updates the installed copy the same way — you never need to keep it.
+
+Read Aloud 1.0.13 and older checked a download path that no longer exists, so Windows users coming from those versions need one manual download of 1.0.14; from 1.0.14 on, updates are automatic.
 
 On a Mac, macOS may ask you to switch Read Aloud back on under **Privacy & Security → Accessibility** after an update, because each build is unsigned.
 
@@ -38,9 +42,10 @@ Older builds using the previous GitHub update feed need the website download onc
 These builds aren't signed with a paid Apple or Microsoft developer certificate, so both systems show a warning the first time. You only have to do this once.
 
 ### Windows
-1. Double-click `ReadAloud-1.0.13.exe`.
+1. Double-click `ReadAloud-1.0.14.exe`.
 2. If you see **"Windows protected your PC"**, click **More info → Run anyway**.
-3. The round button appears on the right of your screen. Right-click it and tick **Start with Windows** if you want it there every time.
+3. The round button appears on the right of your screen. The download has installed the app in your user folder and added **Read Aloud** to the Start menu; you can delete the downloaded file and start it from there next time.
+4. Right-click the button and tick **Start with Windows** if you want it there every time.
 
 ### Mac
 1. Open the zip and drag **Read Aloud** into your **Applications** folder.
@@ -70,6 +75,7 @@ If part of a read was lost the read still ends calmly: on Windows a small orange
 
 ## Troubleshooting
 - **Orange button when clicked:** no text was selected (or, on a Mac, Accessibility permission isn't switched on yet).
+- **Turned on Offline voice only but expected it to apply to something already reading:** switching the voice stops the read in progress, so click the button again. The menu title shows "· offline only" when it is on, and the next read is local. If the offline voice isn't downloaded yet, the button turns orange with a down-arrow and the menu offers **Download offline voice**.
 - **Red button:** it couldn't finish the read. Right-click the button — the menu shows the reason and **Try again**, **Use offline voice** or **Download offline voice**. If Microsoft answered but the passage was long, part of the last read may have been skipped; the button then shows a warning instead of an error.
 - **It stops in the middle of a long read:** it no longer does this silently. If audio is lost, the read ends with a warning naming the sentence, and a stalled connection is retried once per fallback (Microsoft → edge-tts → offline) before giving up.
 - **First read is slow:** fresh cloud speech depends on Microsoft's service and your connection. A fully cached read makes no synthesis request, but hardware and buffering still affect audible start. See the website's versioned benchmark for measured callback timings, not a guaranteed latency.

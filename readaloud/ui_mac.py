@@ -288,6 +288,13 @@ class MacApp:
     def show(self, state, detail=""):
         self.view.show_(state, detail)
 
+    def note(self, text):
+        """A brief confirmation on the button's tooltip after a menu choice."""
+        self.view.setToolTip_(text)
+        self.later(2.2, lambda: self.show(
+            self.controller.state,
+            self.controller.warning if self.controller.state == "idle" else ""))
+
     def later(self, seconds, fn):
         AppHelper.callLater(seconds, fn)
 
@@ -365,13 +372,14 @@ class MacApp:
         for vid, label in st.VOICES:
             item(label, "pickVoice:", vid, vid == self.settings["voice"], voices)
         voices.addItem_(NSMenuItem.separatorItem())
-        item(mt.OFFLINE_LABEL, "toggleOffline:",
-             on=bool(self.settings.get("offline_only")), parent=voices)
         state = item(mt.offline_status(self.controller), None, parent=voices)
         state.setEnabled_(False)
         local = self.controller.engine.local
         if local is not None and not local.ready:
             item(mt.DOWNLOAD_LABEL, "downloadOffline:", parent=voices)
+        voices.addItem_(NSMenuItem.separatorItem())
+        item(mt.OFFLINE_LABEL, "toggleOffline:",
+             on=bool(self.settings.get("offline_only")), parent=voices)
         speeds = submenu(mt.speed_title(self.settings))
         for rate, label in st.SPEEDS:
             item(label, "pickSpeed:", rate, rate == self.settings["rate"], speeds)

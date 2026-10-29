@@ -74,6 +74,34 @@ def login_item_enabled():
     return False
 
 
+def ensure_login_path():
+    """Keep 'Start with Windows' pointing at this copy when it moves.
+
+    The registered path is the downloaded .exe until the permanent copy runs
+    once; after that it must follow the installed .exe or Windows would start
+    an old download at login.
+    """
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return False
+    want = f'"{sys.executable}"'
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Run",
+                            0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
+            try:
+                current, _ = winreg.QueryValueEx(k, "Read Aloud")
+            except OSError:
+                return False
+            if current != want:
+                winreg.SetValueEx(k, "Read Aloud", 0, winreg.REG_SZ, want)
+                log("login item: pointed at the installed copy")
+            return True
+    except Exception as e:
+        log(f"login item: {e!r}")
+        return False
+
+
 def set_login_item(on):
     try:
         if sys.platform == "darwin":

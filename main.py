@@ -48,6 +48,22 @@ def main():
     if old_pid:
         updater.wait_for_exit(int(old_pid))
 
+    # Windows keeps one permanent copy.  A downloaded .exe installs itself and
+    # hands off to it; a newer download replaces it in place, so Downloads no
+    # longer fills up with one file per version.
+    internal = any(f in sys.argv for f in
+                   ("--selftest", "--test-update-swap", "--test-marker"))
+    if sys.platform == "win32" and not internal:
+        updater.cleanup_after_update()
+        from readaloud import install
+        outcome = install.adopt()
+        if outcome in ("handoff", "already-running", "updated-while-running", "failed"):
+            install.explain(outcome)
+            return
+        if outcome != "disabled":
+            from readaloud import settings as st
+            st.ensure_login_path()
+
     _mac_lock = None
     if sys.platform == "darwin" and not old_pid:
         _mac_lock = _mac_single_instance()
