@@ -29,6 +29,10 @@ from AppKit import (
     NSProgressIndicatorStyleSpinning,
     NSScreen,
     NSStatusWindowLevel,
+    NSTrackingActiveAlways,
+    NSTrackingArea,
+    NSTrackingInVisibleRect,
+    NSTrackingMouseEnteredAndExited,
     NSView,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorFullScreenAuxiliary,
@@ -40,6 +44,7 @@ from Foundation import NSObject
 from PyObjCTools import AppHelper
 
 from . import selection_mac, settings as st
+from . import menu_text as mt
 from .controller import Controller
 
 SIZE = 52      # window
@@ -52,6 +57,7 @@ LOOK = {  # state: (symbol, background colour)
     "speaking": ("stop.fill", lambda: NSColor.systemBlueColor()),
     "empty": ("character.cursor.ibeam", lambda: NSColor.systemOrangeColor()),
     "permission": ("lock.fill", lambda: NSColor.systemOrangeColor()),
+    "offline_missing": ("arrow.down.circle.fill", lambda: NSColor.systemOrangeColor()),
     "error": ("exclamationmark.triangle.fill", lambda: NSColor.systemRedColor()),
 }
 TIPS = {
@@ -60,6 +66,7 @@ TIPS = {
     "empty": "Select some text first",
     "permission": "Allow Read Aloud in System Settings > Privacy & Security > Accessibility",
     "error": "Couldn't read aloud - check your internet connection",
+    "offline_missing": "Offline voice not downloaded - menu > Voice > Download offline voice",
 }
 
 
@@ -80,6 +87,9 @@ class ButtonView(NSView):
         self.app_ = None
         self.menu_ = None
         self._down = None
+        self._hover = False
+        self._pressed = False
+        self._tracking = None
         inset = (SIZE - CIRCLE) / 2
         icon = 20
         self.icon = NSImageView.alloc().initWithFrame_(
@@ -109,19 +119,41 @@ class ButtonView(NSView):
     def isFlipped(self):
         return False
 
+    def updateTrackingAreas(self):
+        objc.super(ButtonView, self).updateTrackingAreas()
+        if self._tracking is not None:
+            self.removeTrackingArea_(self._tracking)
+        opts = (NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways
+                | NSTrackingInVisibleRect)
+        self._tracking = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
+            NSMakeRect(0, 0, SIZE, SIZE), opts, self, None)
+        self.addTrackingArea_(self._tracking)
+
+    def mouseEntered_(self, event):
+        self._hover = True
+        self.setNeedsDisplay_(True)
+
+    def mouseExited_(self, event):
+        self._hover = False
+        self.setNeedsDisplay_(True)
+
     def drawRect_(self, rect):
         from AppKit import NSBezierPath
+        shift = 1 if self._pressed else 0
+        inset = self.inset + shift
+        size = CIRCLE - 2 * shift
         _, colour = LOOK.get(self.state, LOOK["idle"])
         colour().setFill()
         NSBezierPath.bezierPathWithOvalInRect_(
-            NSMakeRect(self.inset, self.inset, CIRCLE, CIRCLE)).fill()
-        NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.18).setStroke()
+            NSMakeRect(inset, inset, size, size)).fill()
+        alpha = 0.34 if self._hover else 0.18
+        NSColor.colorWithCalibratedWhite_alpha_(1.0, alpha).setStroke()
         ring = NSBezierPath.bezierPathWithOvalInRect_(
-            NSMakeRect(self.inset + 0.5, self.inset + 0.5, CIRCLE - 1, CIRCLE - 1))
-        ring.setLineWidth_(1.0)
+            NSMakeRect(inset + 0.5, inset + 0.5, size - 1, size - 1))
+        ring.setLineWidth_(1.5 if self._hover else 1.0)
         ring.stroke()
 
-    def show_(self, state):
+    def show_(self, state, detail=""):
         self.state = state
         name, _ = LOOK.get(state, LOOK["idle"])
         if name:
@@ -131,7 +163,10 @@ class ButtonView(NSView):
         else:
             self.icon.setHidden_(True)
             self.spinner.startAnimation_(None)
-        self.setToolTip_(TIPS.get(state, ""))
+        tip = TIPS.get(state, "")
+        if detail:
+            tip = f"{tip}: {detail}" if tip else detail
+        self.setToolTip_(tip)
         self.setNeedsDisplay_(True)
 
     # ---- mouse: click = read/stop, drag = move, right-click = menu
@@ -142,6 +177,8 @@ class ButtonView(NSView):
         self._down = NSEvent.mouseLocation()
         self._origin = self.window().frame().origin
         self._dragged = False
+        self._pressed = True
+        self.setNeedsDisplay_(True)
 
     def mouseDragged_(self, event):
         if self._down is None:
@@ -157,6 +194,8 @@ class ButtonView(NSView):
         if self._down is None:
             return
         self._down = None
+        self._pressed = False
+        self.setNeedsDisplay_(True)
         if self._dragged:
             o = self.window().frame().origin
             self.controller.moved(o.x, o.y)
@@ -164,6 +203,8 @@ class ButtonView(NSView):
             self.controller.click()
 
     def rightMouseDown_(self, event):
+        self._pressed = False
+        self.setNeedsDisplay_(True)
         self.app_.refresh_menu()  # so the offline-voice status is current
         NSMenu.popUpContextMenu_withEvent_forView_(self.menu_, event, self)
 
@@ -198,6 +239,21 @@ class MenuHandler(NSObject):
         self.app.controller.set_auto_update(not self.app.settings.get("auto_update", True))
         self.app.refresh_menu()
 
+    def retry_(self, sender):
+        self.app.controller.retry()
+
+    def downloadOffline_(self, sender):
+        self.app.controller.download_offline()
+        self.app.refresh_menu()
+
+    def clearCache_(self, sender):
+        self.app.controller.clear_cache()
+        self.app.refresh_menu()
+
+    def toggleDiskCache_(self, sender):
+        self.app.controller.set_disk_cache(not self.app.settings.get("disk_cache"))
+        self.app.refresh_menu()
+
     def showHelp_(self, sender):
         self.app.welcome(force=True)
 
@@ -217,6 +273,7 @@ class MacApp:
         self._build_window()
         self.controller.view = self
         self._build_menu()
+        self.controller.start()
 
     def _build_main_menu(self):
         bar = NSMenu.alloc().init()
@@ -228,8 +285,8 @@ class MacApp:
         self.nsapp.setMainMenu_(bar)
 
     # ---- used by Controller
-    def show(self, state):
-        self.view.show_(state)
+    def show(self, state, detail=""):
+        self.view.show_(state, detail)
 
     def later(self, seconds, fn):
         AppHelper.callLater(seconds, fn)
@@ -297,30 +354,45 @@ class MacApp:
             m.addItem_(it)
             return sub
 
-        voices = submenu("Voice")
+        status = self.controller.last_error or self.controller.warning
+        if status:
+            it = item(mt.status_line(status), None)
+            it.setEnabled_(False)
+            item("Try again", "retry:")
+            m.addItem_(NSMenuItem.separatorItem())
+
+        voices = submenu(mt.voice_title(self.settings))
         for vid, label in st.VOICES:
             item(label, "pickVoice:", vid, vid == self.settings["voice"], voices)
         voices.addItem_(NSMenuItem.separatorItem())
-        item("Offline voice only (works without internet)", "toggleOffline:",
+        item(mt.OFFLINE_LABEL, "toggleOffline:",
              on=bool(self.settings.get("offline_only")), parent=voices)
-        status = item(self.controller.offline_status(), None, parent=voices)
-        status.setEnabled_(False)
-        speeds = submenu("Speed")
+        state = item(mt.offline_status(self.controller), None, parent=voices)
+        state.setEnabled_(False)
+        local = self.controller.engine.local
+        if local is not None and not local.ready:
+            item(mt.DOWNLOAD_LABEL, "downloadOffline:", parent=voices)
+        speeds = submenu(mt.speed_title(self.settings))
         for rate, label in st.SPEEDS:
             item(label, "pickSpeed:", rate, rate == self.settings["rate"], speeds)
+        cache = submenu("Audio cache")
+        note = item(mt.CACHE_NOTE, None, parent=cache)
+        note.setEnabled_(False)
+        item(mt.DISK_LABEL, "toggleDiskCache:",
+             on=bool(self.settings.get("disk_cache")), parent=cache)
+        item("Clear audio cache", "clearCache:", parent=cache)
         m.addItem_(NSMenuItem.separatorItem())
         if st.login_item_supported():
             item("Open at Login", "toggleLogin:", on=st.login_item_enabled())
-        item("How to use", "showHelp:")
-        m.addItem_(NSMenuItem.separatorItem())
+        item(mt.HOW_TO_LABEL, "showHelp:")
         up = self.controller.updater
-        status = item(up.status_text(), None)
+        updates = submenu("Updates")
+        status = item(mt.update_status(up), None, parent=updates)
         status.setEnabled_(False)
         if up.supported:
-            item("Install update now" if up.state == "ready" else "Check for updates",
-                 "checkUpdates:")
+            item(mt.update_action(up), "checkUpdates:", parent=updates)
             item("Update automatically", "toggleAutoUpdate:",
-                 on=bool(self.settings.get("auto_update", True)))
+                 on=bool(self.settings.get("auto_update", True)), parent=updates)
         m.addItem_(NSMenuItem.separatorItem())
         item("Quit Read Aloud", "quit:")
 
@@ -328,8 +400,10 @@ class MacApp:
     def welcome(self, force=False):
         if self.settings.get("welcomed") and not force:
             return
-        self.settings["welcomed"] = True
-        st.save(self.settings)
+        try:
+            self.panel.setLevel_(NSStatusWindowLevel)
+        except Exception:
+            pass
         NSApp.activateIgnoringOtherApps_(True)
         a = NSAlert.alloc().init()
         a.setMessageText_("Read Aloud")
@@ -341,6 +415,9 @@ class MacApp:
             "Security > Accessibility. It needs that to see the text you've selected.")
         a.addButtonWithTitle_("OK")
         a.runModal()
+        if not self.settings.get("welcomed"):
+            self.settings["welcomed"] = True   # only after it was dismissed
+            st.save(self.settings)
 
     def run(self):
         if self.selftest:

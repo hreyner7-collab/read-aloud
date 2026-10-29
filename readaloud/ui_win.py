@@ -2,7 +2,7 @@
 
 A small round button that stays on top, never takes focus (so the app you're
 reading in keeps its selection), and can be dragged anywhere. Right-click for
-voice, speed, start-with-Windows and quit.
+voice, speed, audio cache, start-with-Windows and quit.
 """
 import ctypes
 import os
@@ -12,6 +12,7 @@ from tkinter import font as tkfont
 from tkinter import messagebox
 
 from . import settings as st
+from . import menu_text as mt
 from .controller import Controller
 
 IS_WIN = os.name == "nt"
@@ -20,15 +21,28 @@ KEY = "#ff00fe"  # transparent colour around the round button
 COLOURS = {
     "idle": "#232323", "grabbing": "#232323", "loading": "#232323",
     "speaking": "#0a84ff", "empty": "#ff9f0a", "permission": "#ff9f0a",
-    "error": "#ff453a",
+    "offline_missing": "#ff9f0a", "error": "#ff453a",
 }
 # Segoe MDL2 Assets / Segoe Fluent Icons glyphs (built into Windows 10 and 11)
-GLYPHS = {"idle": "", "speaking": "", "empty": "",
-          "permission": "", "error": ""}
+GLYPHS = {"idle": "\ue767", "speaking": "\ue71a", "empty": "\ue7ba",
+          "permission": "\ue72e", "error": "\ue7ba"}
+GLYPHS["offline_missing"] = GLYPHS["empty"]
+TIP_IDLE = "Select text anywhere, then click to read it aloud"
+TIPS = {
+    "speaking": "Click to stop",
+    "empty": "Select some text first",
+    "permission": "Allow Read Aloud in Settings > Privacy & security > Accessibility",
+    "error": "Couldn't read aloud — open the menu for why, or Try again",
+    "offline_missing": "Offline voice not downloaded — menu › Voice › Download offline voice",
+}
 HELP = ("Select text in any app, then click the round button to hear it read aloud. "
         "Click again to stop.\n\n"
         "Drag the button wherever you like. Right-click it for voices, speed, "
-        "and to start it automatically with Windows.")
+        "and to start it automatically with Windows.\n\n"
+        "If part of a sentence could not be read, a small orange dot stays on the "
+        "button. The right-click menu shows the reason and has Try again.\n\n"
+        "Offline voice only works without internet once its model has been "
+        "downloaded (menu > Voice > Download offline voice).")
 
 
 def _asset(name):
@@ -52,12 +66,25 @@ def _single_instance():
     if not IS_WIN:
         return True
     ctypes.windll.kernel32.CreateMutexW(None, False, "ReadAloud.SingleInstance")
-    return ctypes.windll.kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+    if ctypes.windll.kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
+        return True
+    # Someone double-clicking a second copy must be told why nothing appeared.
+    try:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "Read Aloud is already running. Look for the round button at the "
+            "right of your screen - right-click it to quit, then start this one.",
+            "Read Aloud", 0x40)          # MB_ICONINFORMATION
+    except Exception:
+        pass
+    return False
 
 
 class WinApp:
     def __init__(self, selftest=None, selection=None):
-        if not _single_instance():
+        # --selftest is only ever passed by the build check, and it has to be
+        # able to run beside the copy already on the screen.
+        if selftest is None and not _single_instance():
             raise SystemExit(0)
         _dpi_aware()
         self.selftest = selftest
@@ -76,27 +103,66 @@ class WinApp:
         self.size = int(52 * self.scale)
         self.settings = st.load()
         self.controller = Controller(self.q.put, selection, self.settings)
+        self._start = None
+        self._dragged = False
+        self._tip = None
+        self._tip_text = ""
+        self._spin_angle = 0
+        self._spinning = False
+        self._state = "idle"
+        self._detail = ""
+        self._hover = False
+        self._pressed = False
+        self.canvas = None
+        self.menu = None
         self._build_window()
         self.controller.view = self
         self._build_menu()
-        self._spin_angle = 0
-        self._spinning = False
-        self.show("idle")
+        self.show("idle", "")
         self.root.after(30, self._drain)
+        self.controller.start()
 
     # ---- used by Controller
-    def show(self, state):
+    def show(self, state, detail=""):
+        self._state, self._detail = state, detail
+        self._draw()
+        warning = self.controller.warning if state == "idle" else ""
+        self._tip_text = detail or warning or TIPS.get(state, "") or TIP_IDLE
+        self._tip_hide()
+
+    def _draw(self):
         c, s = self.canvas, self.size
+        if c is None:
+            return
         c.delete("all")
-        pad = int(4 * self.scale)
-        c.create_oval(pad, pad, s - pad, s - pad, fill=COLOURS.get(state, "#232323"),
-                      outline="#4a4a4a" if state in ("idle", "grabbing", "loading") else "")
-        self._spinning = state in ("grabbing", "loading")
+        pad = int(4 * self.scale) + (1 if self._pressed else 0)
+        fill = COLOURS.get(self._state, COLOURS["idle"])
+        if self._hover and self._state in ("idle", "grabbing", "loading"):
+            fill = "#2f2f2f"
+        # Two soft edges read as depth on the transparent window; neither
+        # changes the 44 px button footprint.
+        c.create_oval(pad - 1, pad - 1, s - pad + 1, s - pad + 1,
+                      fill="", outline="#101010", width=max(2, int(2 * self.scale)))
+        c.create_oval(pad, pad, s - pad, s - pad, fill=fill,
+                      outline="#8a8a8a" if self._hover else "#4a4a4a",
+                      width=max(1, int(self.scale)))
+        if self._state in ("idle", "grabbing", "loading") and not self._spinning:
+            c.create_arc(pad + 3, pad + 3, s - pad - 3, s - pad - 3,
+                         start=35, extent=110, style=tk.ARC,
+                         outline="#3d3d3d", width=max(1, int(self.scale)))
+        self._spinning = self._state in ("grabbing", "loading")
         if self._spinning:
             self._spin()
         else:
-            c.create_text(s / 2, s / 2, text=GLYPHS.get(state, GLYPHS["idle"]),
-                          fill="white", font=(self.icon_font, int(15 * self.scale) * -1))
+            c.delete("spin")
+            c.create_text(s / 2, s / 2, text=GLYPHS.get(self._state, GLYPHS["idle"]),
+                          fill="white", font=(self.icon_font, int(18 * self.scale) * -1))
+            if self._state == "idle" and (self.controller.warning or self._detail):
+                d = int(5 * self.scale)
+                x, y = s - d - int(3 * self.scale), d + int(4 * self.scale)
+                c.create_oval(x - d, y - d, x + d, y + d, fill="#ff9f0a",
+                              outline=fill, width=max(1, int(self.scale)),
+                              tags="warning")
 
     def later(self, seconds, fn):
         self.root.after(int(seconds * 1000), fn)
@@ -121,6 +187,43 @@ class WinApp:
             pass
         self.root.after(30, self._drain)
 
+    # ---- tooltip: warnings and errors stay visible, non-modal
+    def _enter(self, _event=None):
+        self._hover = True
+        self._draw()
+        self._tip_show()
+
+    def _leave(self, _event=None):
+        self._hover = False
+        self._pressed = False
+        self._draw()
+        self._tip_hide()
+
+    def _tip_show(self, _event=None):
+        self._tip_hide()
+        if not self._tip_text:
+            return
+        t = tk.Toplevel(self.root)
+        t.overrideredirect(True)
+        try:
+            t.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        tk.Label(t, text=self._tip_text, bg="#2b2b2b", fg="white", padx=8, pady=4,
+                 wraplength=int(260 * self.scale), justify="left").pack()
+        x = self.root.winfo_x() - int(250 * self.scale)
+        y = self.root.winfo_y() + self.size + 4
+        t.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self._tip = t
+
+    def _tip_hide(self, _event=None):
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except tk.TclError:
+                pass
+            self._tip = None
+
     # ---- window
     def _build_window(self):
         r, s = self.root, self.size
@@ -139,11 +242,15 @@ class WinApp:
         self.canvas.pack()
         fams = set(tkfont.families(r))
         self.icon_font = "Segoe Fluent Icons" if "Segoe Fluent Icons" in fams else "Segoe MDL2 Assets"
+        menu_family = "Segoe UI Variable Text" if "Segoe UI Variable Text" in fams else "Segoe UI"
+        self.menu_font = tkfont.Font(root=r, family=menu_family, size=10)
         c = self.canvas
         c.bind("<ButtonPress-1>", self._down)
         c.bind("<B1-Motion>", self._drag)
         c.bind("<ButtonRelease-1>", self._up)
         c.bind("<ButtonPress-3>", self._menu)
+        c.bind("<Enter>", self._enter)
+        c.bind("<Leave>", self._leave)
         r.update_idletasks()
         # Closing from the taskbar (right-click > Close window) quits the app
         r.protocol("WM_DELETE_WINDOW", self.quit)
@@ -189,8 +296,12 @@ class WinApp:
     def _down(self, e):
         self._start = (e.x_root, e.y_root, self.root.winfo_x(), self.root.winfo_y())
         self._dragged = False
+        self._pressed = True
+        self._draw()
 
     def _drag(self, e):
+        if self._start is None:
+            return
         sx, sy, wx, wy = self._start
         dx, dy = e.x_root - sx, e.y_root - sy
         if abs(dx) + abs(dy) > 3:
@@ -199,6 +310,11 @@ class WinApp:
             self.root.geometry(f"+{wx + dx}+{wy + dy}")
 
     def _up(self, e):
+        if self._start is None:
+            return                     # release without a matching press
+        self._start = None
+        self._pressed = False
+        self._draw()
         if self._dragged:
             self.controller.moved(self.root.winfo_x(), self.root.winfo_y())
         else:
@@ -206,57 +322,110 @@ class WinApp:
 
     # ---- right-click menu
     def _build_menu(self):
-        m = tk.Menu(self.root, tearoff=0)
+        if self.menu is not None:
+            try:
+                self.menu.destroy()    # one menu lives at a time (no Tk leak)
+            except tk.TclError:
+                pass
+            self.menu = None
+        controller = self.controller
+
+        def make(parent):
+            return tk.Menu(parent, tearoff=0, font=self.menu_font,
+                           activebackground="#0a84ff", activeforeground="white")
+
+        m = make(self.root)
+        status = controller.last_error or controller.warning
+        if status:
+            m.add_command(label=mt.status_line(status), state="disabled")
+            m.add_command(label="Try again", command=controller.retry)
+            m.add_separator()
+
         self.voice_var = tk.StringVar(value=self.settings["voice"])
         self.rate_var = tk.StringVar(value=self.settings["rate"])
         self.login_var = tk.BooleanVar(value=st.login_item_enabled())
-        voices = tk.Menu(m, tearoff=0)
+        voices = make(m)
         for vid, label in st.VOICES:
             voices.add_radiobutton(label=label, value=vid, variable=self.voice_var,
-                                   command=lambda: self.controller.set_voice(self.voice_var.get()))
-        speeds = tk.Menu(m, tearoff=0)
-        for rate, label in st.SPEEDS:
-            speeds.add_radiobutton(label=label, value=rate, variable=self.rate_var,
-                                   command=lambda: self.controller.set_rate(self.rate_var.get()))
+                                   command=lambda: controller.set_voice(self.voice_var.get()))
         self.offline_var = tk.BooleanVar(value=bool(self.settings.get("offline_only")))
         voices.add_separator()
-        voices.add_checkbutton(label="Offline voice only (works without internet)",
-                               variable=self.offline_var,
-                               command=lambda: self.controller.set_offline_only(self.offline_var.get()))
-        voices.add_command(label=self.controller.offline_status(), state="disabled")
-        m.add_cascade(label="Voice", menu=voices)
-        m.add_cascade(label="Speed", menu=speeds)
+        voices.add_checkbutton(label=mt.OFFLINE_LABEL, variable=self.offline_var,
+                               command=lambda: controller.set_offline_only(self.offline_var.get()))
+        voices.add_command(label=mt.offline_status(controller), state="disabled")
+        local = controller.engine.local
+        if local is not None and not local.ready:
+            voices.add_command(label=mt.DOWNLOAD_LABEL,
+                               command=controller.download_offline)
+        m.add_cascade(label=mt.voice_title(self.settings), menu=voices)
+
+        speeds = make(m)
+        for rate, label in st.SPEEDS:
+            speeds.add_radiobutton(label=label, value=rate, variable=self.rate_var,
+                                   command=lambda: controller.set_rate(self.rate_var.get()))
+        m.add_cascade(label=mt.speed_title(self.settings), menu=speeds)
+
+        cache = make(m)
+        cache.add_command(label=mt.CACHE_NOTE, state="disabled")
+        self.disk_cache_var = tk.BooleanVar(value=bool(self.settings.get("disk_cache")))
+        cache.add_checkbutton(label=mt.DISK_LABEL, variable=self.disk_cache_var,
+                              command=lambda: controller.set_disk_cache(
+                                  self.disk_cache_var.get()))
+        cache.add_command(label="Clear audio cache", command=controller.clear_cache)
+        m.add_cascade(label="Audio cache", menu=cache)
+
         m.add_separator()
         if st.login_item_supported():
             m.add_checkbutton(label="Start with Windows", variable=self.login_var,
                               command=lambda: st.set_login_item(self.login_var.get()))
-        m.add_command(label="How to use", command=lambda: self.welcome(force=True))
-        m.add_separator()
-        up = self.controller.updater
-        m.add_command(label=up.status_text(), state="disabled")
+        m.add_command(label=mt.HOW_TO_LABEL, command=lambda: self.welcome(force=True))
+
+        up = controller.updater
+        updates = make(m)
+        updates.add_command(label=mt.update_status(up), state="disabled")
         if up.supported:
-            m.add_command(label="Install update now" if up.state == "ready" else "Check for updates",
-                          command=self.controller.check_for_updates)
-            self.auto_update_var = tk.BooleanVar(value=bool(self.settings.get("auto_update", True)))
-            m.add_checkbutton(label="Update automatically", variable=self.auto_update_var,
-                              command=lambda: self.controller.set_auto_update(self.auto_update_var.get()))
+            updates.add_command(label=mt.update_action(up),
+                                command=controller.check_for_updates)
+            self.auto_update_var = tk.BooleanVar(
+                value=bool(self.settings.get("auto_update", True)))
+            updates.add_checkbutton(label="Update automatically", variable=self.auto_update_var,
+                                    command=lambda: controller.set_auto_update(
+                                        self.auto_update_var.get()))
+        m.add_cascade(label="Updates", menu=updates)
+
         m.add_separator()
         m.add_command(label="Quit Read Aloud", command=self.quit)
         self.menu = m
 
     def _menu(self, e):
-        self._build_menu()  # so the offline-voice status is current
+        self._tip_hide()
+        self._build_menu()  # so statuses are current
+        m = self.menu
         try:
-            self.menu.tk_popup(e.x_root, e.y_root)
+            m.tk_popup(e.x_root, e.y_root)
         finally:
-            self.menu.grab_release()
+            try:
+                m.grab_release()
+            except tk.TclError:
+                pass
+            try:
+                m.destroy()
+            except tk.TclError:
+                pass
+            if self.menu is m:
+                self.menu = None
 
     def welcome(self, force=False):
         if self.settings.get("welcomed") and not force:
             return
-        self.settings["welcomed"] = True
-        st.save(self.settings)
+        try:
+            self.root.attributes("-topmost", True)
+        except tk.TclError:
+            pass
         messagebox.showinfo("Read Aloud", HELP, parent=self.root)
+        if not self.settings.get("welcomed"):
+            self.settings["welcomed"] = True   # only after it was dismissed
+            st.save(self.settings)
 
     def run(self):
         if self.selftest:

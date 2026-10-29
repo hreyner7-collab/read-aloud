@@ -1,8 +1,12 @@
 # PyInstaller build recipe for Read Aloud (Windows .exe and macOS .app)
+import os
 import sys
 from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
 
-VERSION = "1.0.0"
+_version = {}
+exec(open(os.path.join(SPECPATH, "readaloud", "version.py"), encoding="utf-8").read(),
+     _version)
+VERSION = _version["VERSION"]
 datas, binaries, hidden = [], [], ["_cffi_backend"]
 for pkg in ("miniaudio", "cffi", "edge_tts", "certifi", "espeakng_loader"):
     d, b, h = collect_all(pkg)

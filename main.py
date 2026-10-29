@@ -2,6 +2,7 @@
 
 Usage:  Read Aloud [--selftest RESULT.json]
 Internal: --after-update PID   (started by the old copy after a self-update)
+          --update-check       (daily task: check and stage, no UI)
           --test-update-swap STAGED MARKER   (CI: test the update swap)
 """
 import json
@@ -16,13 +17,42 @@ def _arg(name):
     return None
 
 
+def _mac_single_instance():
+    """One button per Mac.  The self-updater relaunch passes --after-update,
+    which skips this lock while the old copy is still quitting."""
+    import fcntl
+    from readaloud.paths import data_dir
+    f = open(os.path.join(data_dir(), "instance.lock"), "a+")
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    f.seek(0)
+    f.truncate()
+    f.write(str(os.getpid()))
+    f.flush()
+    return f
+
+
 def main():
     from readaloud import updater
+
+    # Headless daily check: no UI, no single-instance lock, no speech engine.
+    # It stages only; the app installs the update when idle or at next launch.
+    if "--update-check" in sys.argv:
+        raise SystemExit(updater.run_daily_check())
 
     # A self-update just started us: let the old copy finish quitting first
     old_pid = _arg("--after-update")
     if old_pid:
         updater.wait_for_exit(int(old_pid))
+
+    _mac_lock = None
+    if sys.platform == "darwin" and not old_pid:
+        _mac_lock = _mac_single_instance()
+        if _mac_lock is None:
+            return                      # another Read Aloud is already running
 
     # CI test of the update swap, no UI
     marker = _arg("--test-marker")

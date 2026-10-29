@@ -1,17 +1,20 @@
 """Platform-independent button logic: click -> grab selection -> speak / stop."""
 import threading
+import time
 
 from . import engine as eng
 from .engine import Engine, log
 
-# Button states: idle, grabbing, loading, speaking, empty, error, permission
+# Button states: idle, grabbing, loading, speaking, empty, error, permission,
+# offline_missing
 BUSY = ("grabbing", "loading", "speaking")
+FLASH = ("empty", "permission")     # shown briefly, then back to idle
+CLICK_DEBOUNCE = 0.35
 
 
 def selftest_mode():
     import sys
     return "--selftest" in sys.argv
-FLASH = ("empty", "error", "permission")  # shown briefly, then back to idle
 
 
 class Controller:
@@ -23,16 +26,30 @@ class Controller:
         self.view = None
         self.state = "idle"
         self._token = 0
+        self._last_click = 0.0
+        self._last_text = ""
+        self.last_error = ""
+        self.warning = ""
         eng.VOICE = settings["voice"]
         eng.RATE = settings["rate"]
         eng.OFFLINE_ONLY = bool(settings.get("offline_only"))
-        self.engine = Engine(self._engine_state)
+        self.engine = Engine(self._engine_state, settings=settings)
         from .updater import Updater
         self.updater = Updater(on_change=self._update_changed,
                                on_ready=lambda: self.post(self._install_when_idle))
         self.updater.auto = bool(settings.get("auto_update", True))
-        if not selftest_mode():
-            self.updater.start_background()
+
+    def start(self):
+        """Called once the window exists: start updates and the daily task."""
+        if selftest_mode():
+            return
+        self.updater.start_background()
+        if self.view is None:
+            self.updater.sync_daily_task()
+            return
+        self.view.later(2.0, self.updater.sync_daily_task)
+        if self.updater.state == "ready" and self.settings.get("auto_update", True):
+            self.view.later(1.2, self._install_when_idle)
 
     # ---- self-update
     def _update_changed(self):
@@ -54,7 +71,7 @@ class Controller:
         self.updater.install(self.view.quit_app)
 
     def check_for_updates(self):
-        if self.updater.state == "ready":
+        if self.updater.state == "ready" or self.updater.staged:
             self.install_update()
         else:
             self.updater.check_now()
@@ -62,29 +79,46 @@ class Controller:
     def set_auto_update(self, on):
         self.settings["auto_update"] = self.updater.auto = bool(on)
         self._save()
-        if on and self.updater.state == "ready":
-            self._install_when_idle()
+        self.updater.sync_daily_task()
+        if on:
+            self.updater.wake()
+            if self.updater.state == "ready":
+                self._install_when_idle()
 
     # called from engine threads
-    def _engine_state(self, s):
-        self.post(lambda: self._set(s))
+    def _engine_state(self, s, detail="", gen=0):
+        if gen != self.engine.gen:
+            return  # late event from a read the user already stopped
+        self.post(lambda: self._set(s, detail))
 
-    def _set(self, s):
+    def _set(self, s, detail=""):
         if s == "idle" and self.state in FLASH:
             return  # let the flash finish
+        if s == "error":
+            self.last_error = detail or "couldn't read aloud"
+        if s == "idle":
+            self.warning = detail if detail else ""
+        if s in ("loading", "speaking"):
+            self.warning = ""
         self.state = s
         if self.view:
-            self.view.show(s)
+            self.view.show(s, detail)
         if s in FLASH:
             tok = self._token
 
             def back():
                 if self.state == s and self._token == tok:
                     self.state = "idle"
-                    self.view.show("idle")
+                    self.view.show("idle", self.warning)
             self.view.later(1.6, back)
 
     def click(self):
+        now = time.monotonic()
+        if now - self._last_click < CLICK_DEBOUNCE:
+            return  # a double-click reads once
+        self._last_click = now
+        if self.state == "grabbing":
+            return  # a click while the selection is being grabbed
         self._token += 1
         if self.state in BUSY:
             self.engine.stop()
@@ -102,14 +136,26 @@ class Controller:
         try:
             text = self.sel.get_selected_text()
         except Exception as e:
-            log(f"selection error: {e!r}")
+            log(f"selection error: {type(e).__name__}: {e}")
             text = None
         if tok != self._token:
             return  # user clicked again (stop) meanwhile
         if not text:
             self.post(lambda: self._set("empty"))
             return
+        self._speak(text)
+
+    def _speak(self, text):
+        self._last_text = text
+        self.last_error = ""
         self.engine.speak(text)
+
+    def retry(self):
+        """Menu action after an error: try the same text again."""
+        if self.state in BUSY:
+            return
+        if self._last_text:
+            self._speak(self._last_text)
 
     # menu actions
     def set_voice(self, voice):
@@ -122,9 +168,30 @@ class Controller:
 
     def set_offline_only(self, on):
         eng.OFFLINE_ONLY = self.settings["offline_only"] = bool(on)
-        if on:
-            self.engine.preload_offline()
+        self.engine.set_offline_only(on)
         self._save()
+
+    def download_offline(self):
+        local = self.engine.local
+        if local is None:
+            return  # still starting; the menu will offer it again
+        local.retry_download()
+        self._update_changed()
+
+    def set_disk_cache(self, on):
+        self.settings["disk_cache"] = bool(on)
+        cache = self.engine.cache
+        if cache is not None:
+            cache.set_disk(on)
+            if not on:
+                cache.clear_disk()
+        self._save()
+
+    def clear_cache(self):
+        cache = self.engine.cache
+        if cache is not None:
+            cache.clear_ram()
+            cache.clear_disk()
 
     def offline_status(self):
         try:

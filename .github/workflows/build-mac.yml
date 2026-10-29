@@ -1,0 +1,127 @@
+name: Build Mac (Apple Silicon + Intel)
+
+on:
+  push:
+    branches: [mac-1.0.13]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest          # Apple Silicon (M1 and newer)
+            artifact: ReadAloud-Mac.zip
+            arch: arm64
+          - os: macos-15-intel        # Intel Macs (2015-2020)
+            artifact: ReadAloud-Mac-Intel.zip
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          pip install --no-deps -r requirements-nodeps.txt
+          pip install pytest==8.3.4   # CI only, never bundled
+
+      - name: Unit tests, no network, no audio device
+        run: |
+          python -m compileall -q main.py readaloud scripts tests
+          python -m pytest -q
+
+      - name: Use numpy built for macOS 11 (the default one needs macOS 14)
+        run: |
+          pip download numpy==2.3.5 --no-deps --only-binary=:all: --python-version 3.12 \
+            --implementation cp --abi cp312 --platform macosx_11_0_${{ matrix.arch }} -d mac11
+          pip install --force-reinstall --no-deps mac11/numpy-*.whl
+
+      - name: Build espeak-ng for macOS 11 (the packaged copy needs macOS 13.7/14)
+        run: |
+          git clone -q --depth 1 --branch 1.52.0 https://github.com/espeak-ng/espeak-ng.git espeak-src
+          cmake -S espeak-src -B espeak-build -DBUILD_SHARED_LIBS=ON -DUSE_MBROLA=OFF \
+            -DUSE_LIBSONIC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_ASYNC=OFF -DUSE_SPEECHPLAYER=OFF \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          cmake --build espeak-build --target espeak-ng -j3
+          built=espeak-build/src/libespeak-ng/libespeak-ng.1.52.0.dylib
+          dest=$(python -c "import espeakng_loader, os; print(os.path.dirname(espeakng_loader.__file__))")
+          for f in "$dest"/libespeak-ng*.dylib; do rm -f "$f"; cp "$built" "$f"; done
+          python scripts/check_macos_compat.py "$dest" ${{ matrix.arch }} 11.0
+
+      - name: Build
+        run: pyinstaller ReadAloud.spec --noconfirm --clean
+
+      - name: Self-test - launch the real .app, fetch real speech
+        run: |
+          out="$RUNNER_TEMP/selftest.json"
+          READ_ALOUD_AUDIO_BACKEND=null "dist/Read Aloud.app/Contents/MacOS/Read Aloud" --selftest "$out" &
+          pid=$!
+          for i in $(seq 1 300); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          kill $pid 2>/dev/null || true
+          python scripts/check_selftest.py "$out"
+
+      - name: Test closing it like a normal app (Dock > Quit)
+        run: python scripts/test_close.py "dist/Read Aloud.app"
+
+      - name: Check it runs on older Macs (right chip, macOS 11+)
+        run: python scripts/check_macos_compat.py "dist/Read Aloud.app" ${{ matrix.arch }} 11.0
+
+      - name: Check the app's version number matches the source
+        run: |
+          want=$(python -c "import re;print(re.search(r'VERSION = \"([^\"]+)\"', open('readaloud/version.py').read()).group(1))")
+          got=$(python -c "import plistlib;print(plistlib.load(open('dist/Read Aloud.app/Contents/Info.plist','rb'))['CFBundleShortVersionString'])")
+          echo "source=$want plist=$got"
+          test "$want" = "$got"
+
+      - name: One button per Mac (second launch exits; updater relaunch bypasses)
+        run: |
+          APP="dist/Read Aloud.app/Contents/MacOS/Read Aloud"
+          READ_ALOUD_AUDIO_BACKEND=null "$APP" &
+          p1=$!
+          sleep 4
+          kill -0 $p1 || { echo "::error::first launch exited"; exit 1; }
+          READ_ALOUD_AUDIO_BACKEND=null "$APP" &
+          p2=$!
+          sleep 3
+          if kill -0 $p2 2>/dev/null; then
+            echo "::error::second launch is still running (two buttons)"
+            kill $p2 $p1 2>/dev/null || true
+            exit 1
+          fi
+          READ_ALOUD_AUDIO_BACKEND=null "$APP" --after-update 999999 &
+          p3=$!
+          sleep 3
+          if ! kill -0 $p3 2>/dev/null; then
+            echo "::error::--after-update did not bypass the single-instance lock"
+            kill $p1 2>/dev/null || true
+            exit 1
+          fi
+          kill $p3 $p1 2>/dev/null || true
+          wait $p3 $p1 2>/dev/null || true
+
+      - name: Package
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "dist/Read Aloud.app" ${{ matrix.artifact }}
+          shasum -a 256 ${{ matrix.artifact }} | tee ${{ matrix.artifact }}.sha256
+          ls -l ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.sha256
