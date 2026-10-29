@@ -2,7 +2,7 @@ name: Build Mac (Apple Silicon + Intel)
 
 on:
   push:
-    branches: [mac-1.0.13]
+    branches: [mac-1.0.13-arm64]
   workflow_dispatch:
 
 permissions:
@@ -14,12 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest          # Apple Silicon (M1 and newer)
+          - os: macos-14              # Apple Silicon (M1 and newer), fallback pool
             artifact: ReadAloud-Mac.zip
             arch: arm64
-          - os: macos-15-intel        # Intel Macs (2015-2020)
-            artifact: ReadAloud-Mac-Intel.zip
-            arch: x86_64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
