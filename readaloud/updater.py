@@ -57,6 +57,10 @@ class UpdateError(Exception):
     pass
 
 
+class NoBuildError(UpdateError):
+    """The manifest is valid but publishes no build for this platform."""
+
+
 @dataclasses.dataclass
 class Artifact:
     version: str
@@ -126,12 +130,13 @@ def parse_manifest(payload, key, base_url=MANIFEST_URL):
     if isinstance(artifacts, dict):
         entry = artifacts.get(key)
     elif artifacts is None and isinstance(payload.get("path"), str):
-        # Sites published before 1.0.13 describe one build at the top level.
-        entry = payload
+        # Sites published before 1.0.13 describe one build at the top level,
+        # and that build is the Windows one.
+        entry = payload if key == "windows" else None
     else:
         entry = None
     if not isinstance(entry, dict):
-        raise UpdateError(f"manifest has no {key} build")
+        raise NoBuildError(f"manifest has no {key} build")
 
     base = urllib.parse.urlsplit(str(base_url))
     if base.scheme != "https" or not base.netloc or "@" in base.netloc:
@@ -677,6 +682,7 @@ class Updater:
                      else f"{v}: update {self.latest} available",
             "installing": f"Installing {self.latest}…",
             "error": f"{v}: {self.error or 'update check failed'}",
+            "not_available": f"{v} (no update published for this device)",
             "unsupported": f"Version {VERSION}",
         }.get(self.state, v)
 
@@ -765,6 +771,10 @@ class Updater:
                 write_staged_meta(art)
             log(f"update {art.version} downloaded and verified")
             self._stage(art)
+        except NoBuildError:
+            # The feed is fine; it publishes no build for this platform. Mac
+            # builds are manual downloads until the feed hosts them too.
+            self._set("not_available")
         except Exception as e:
             log(f"update check failed: {e!r}")
             self._set("error", str(e)[:120])

@@ -179,6 +179,30 @@ def test_staged_metadata_cannot_escape_or_change_platform(tmp_path, monkeypatch,
     assert (tmp_path / "update" / art.name).read_bytes() == GOOD
 
 
+def test_a_legacy_feed_publishes_only_the_windows_build():
+    payload = {"version": "1.0.13", "path": "/files/ReadAloud-1.0.13.exe",
+               "name": "ReadAloud-1.0.13.exe", "sha256": SHA,
+               "size_bytes": len(GOOD)}
+    assert U.parse_manifest(payload, "windows").name == "ReadAloud-1.0.13.exe"
+    with pytest.raises(U.NoBuildError):
+        U.parse_manifest(payload, "macos-arm64")
+
+
+def test_a_feed_without_this_platform_is_not_a_failed_check(tmp_path, monkeypatch):
+    monkeypatch.setattr(U, "data_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(U, "VERSION", "1.0.12")
+    monkeypatch.setattr(U, "install_target", lambda: str(tmp_path / "Read Aloud.app"))
+    monkeypatch.setattr(U, "artifact_key", lambda: "macos-arm64")
+    payload = json.dumps({"version": "1.0.13", "path": "/files/ReadAloud-1.0.13.exe",
+                          "name": "ReadAloud-1.0.13.exe", "sha256": SHA,
+                          "size_bytes": len(GOOD)}).encode()
+    monkeypatch.setattr(U, "_get", lambda url, timeout=60: Response(payload, chunk=1 << 20))
+    up = U.Updater()
+    up.check()
+    assert up.state == "not_available"
+    assert "no update published" in up.status_text()
+
+
 # ---------------------------------------------------------------- download
 
 def test_a_download_is_size_and_hash_checked_before_it_is_staged(tmp_path):
