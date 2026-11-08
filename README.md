@@ -22,7 +22,7 @@ Use the public **[Read Aloud download website](https://read-aloud-si5xpl4ll0k.qo
 | Mac with Apple Silicon (M1 or newer) | `ReadAloud-Mac.zip` (macOS 11+) |
 | Mac with an Intel chip | `ReadAloud-Mac-Intel.zip` (macOS 11+) |
 
-Both Mac builds are produced and exercised on Apple's macOS runners: the packaged app launches, reads real speech online and offline, falls back to the offline voice, quits from the Dock, and only one button runs at a time. They are unsigned and not notarized and were not tried on a physical Mac before release. The in-app update feed publishes only the Windows build, so Mac updates are manual downloads from the website.
+Both Mac builds are produced and exercised on Apple's macOS runners: the packaged app launches, reads real speech online and offline, falls back to the offline voice, quits from the Dock, and only one button runs at a time. They are unsigned and not notarized and were not tried on a physical Mac before release. The update feed publishes one entry per platform, so a Mac app updates itself in place in its **Applications** folder; the first launch still needs the manual Open step below.
 
 Not sure which Mac you have? Click the Apple menu → **About This Mac**. If it says **Chip: Apple M…**, it's Apple Silicon. If it says **Processor: … Intel**, it's Intel.
 
