@@ -123,6 +123,31 @@ def test_stop_mid_read_marks_cancelled_without_end_state(monkeypatch):
     assert ledger["partial"] == ledger["skipped"] == 0
 
 
+def test_first_sound_queued_before_a_stop_does_not_relight_the_button(monkeypatch):
+    """The audio thread posts first-sound; a stop can land before it runs."""
+    async def run():
+        engine = FakeEngine(local=FakeLocal(ready=True))
+        session, factory, states = fast_session(monkeypatch, engine, TEXT)
+
+        class Stopped:
+            stopped = True
+
+        session.player = Stopped()
+        session._first_sound()
+        await asyncio.sleep(0)
+        assert states == [], f"speaking emitted after the player stopped: {states}"
+
+        newer, _, newer_states = fast_session(monkeypatch, engine, TEXT)
+        engine.gen = 2                      # a newer read took over
+        newer._first_sound()
+        await asyncio.sleep(0)
+        assert newer_states == [], f"speaking emitted after generation moved on"
+        # the latency number is still measured, only the button is left alone
+        assert session.first_ms is not None and newer.first_ms is not None
+
+    _run(run())
+
+
 def test_cancelled_atom_is_marked_and_read_continues(monkeypatch):
     """A synth task cancelled mid-read must be recorded, not skipped past."""
     async def run():

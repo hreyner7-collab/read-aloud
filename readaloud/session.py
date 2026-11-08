@@ -295,6 +295,11 @@ class Session:
     def _first_sound_on_loop(self):
         if self.first_ms is None:
             self.first_ms = (time.perf_counter() - self.t0) * 1000
+            # The audio thread posts this before the loop runs it, so a stop
+            # can land in between. A read the user already ended must not put
+            # the button back to blue.
+            if self._stop_emitting() or (self.player and self.player.stopped):
+                return
             self._emit("speaking")
 
     def _player_finished(self, reason):
