@@ -42,7 +42,7 @@ from .version import VERSION
 
 MANIFEST_URL = os.environ.get(
     "READ_ALOUD_UPDATE_MANIFEST",
-    "https://read-aloud-kvtn6ncvzmt.qoder.website/manifest.json")
+    "https://read-aloud-si5xpl4ll0k.qoder.website/manifest.json")
 # The site hosts the manifest; the 50 MB builds live on this project's GitHub
 # releases.  Both are named here so a tampered manifest cannot point anywhere
 # else, and GitHub's own asset host is the only redirect we follow.

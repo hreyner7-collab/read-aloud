@@ -14,11 +14,11 @@ A small floating button that reads out any text you select, using Microsoft's na
 
 ## Download
 
-Use the public **[Read Aloud download website](https://read-aloud-kvtn6ncvzmt.qoder.website)**. No account is required.
+Use the public **[Read Aloud download website](https://read-aloud-si5xpl4ll0k.qoder.website)**. No account is required.
 
-| Computer | Version 1.0.15 |
+| Computer | Version 1.0.16 |
 |---|---|
-| Windows 10 / 11, 64-bit | `ReadAloud-1.0.15.exe` |
+| Windows 10 / 11, 64-bit | `ReadAloud-1.0.16.exe` |
 | Mac with Apple Silicon (M1 or newer) | `ReadAloud-Mac.zip` (macOS 11+) |
 | Mac with an Intel chip | `ReadAloud-Mac-Intel.zip` (macOS 11+) |
 
@@ -32,18 +32,18 @@ Read Aloud checks the public website's manifest shortly after launch and every s
 
 On Windows the download is a one-time installer: it copies itself to `%LOCALAPPDATA%\Programs\Read Aloud\ReadAloud.exe`, adds a Start-menu shortcut, and starts that copy. Updates replace that single file in place, so there is only ever one Read Aloud and the file you downloaded can be deleted. A newer download updates the installed copy the same way — you never need to keep it.
 
-Read Aloud 1.0.13 and older checked a download path that no longer exists, so Windows users coming from those versions need one manual download of 1.0.15; from 1.0.14 on, updates are automatic.
+The download site moved address when 1.0.16 was published, and each build has the address baked into it. Builds 1.0.14 and 1.0.15 still check the previous address, which is frozen at 1.0.14 and will never offer them anything newer; builds 1.0.13 and older check a path that no longer exists at all. So anyone not already on 1.0.16 needs one manual download from the website — from 1.0.16 on, updates come automatically from the current address.
 
 On a Mac, macOS may ask you to switch Read Aloud back on under **Privacy & Security → Accessibility** after an update, because each build is unsigned.
 
-Older builds using the previous GitHub update feed need the website download once to move to this feed. Offline model repair is separate: the app rechecks its fingerprint in the background, replaces corrupt bytes, and retries load failures without deleting a valid model.
+Offline model repair is separate from updates: the app rechecks its fingerprint in the background, replaces corrupt bytes, and retries load failures without deleting a valid model.
 
 ## First launch
 
 These builds aren't signed with a paid Apple or Microsoft developer certificate, so both systems show a warning the first time. You only have to do this once.
 
 ### Windows
-1. Double-click `ReadAloud-1.0.15.exe`.
+1. Double-click `ReadAloud-1.0.16.exe`.
 2. If you see **"Windows protected your PC"**, click **More info → Run anyway**.
 3. The round button appears on the right of your screen. The download has installed the app in your user folder and added **Read Aloud** to the Start menu; you can delete the downloaded file and start it from there next time.
 4. Right-click the button and tick **Start with Windows** if you want it there every time.
@@ -60,7 +60,8 @@ These builds aren't signed with a paid Apple or Microsoft developer certificate,
 |---|---|---|
 | Dark grey | idle | select text and click it |
 | Dark grey, spinning | grabbing your selection or loading | wait a moment |
-| Blue, with a stop sign | speaking | click it again to stop |
+| Blue, with a stop square | speaking | click it to pause; right-click → **Stop reading** to end it |
+| Indigo, two bars | paused, keeping your place | click it again to carry on from the same sentence |
 | Orange | nothing was selected (or, on a Mac, Accessibility isn't on yet) | select some text |
 | Orange, down-arrow | Offline voice only is on but the 177 MB voice isn't downloaded | right-click → Voice → **Download offline voice** |
 | Red | this read failed | right-click: the menu shows the reason and **Try again** |

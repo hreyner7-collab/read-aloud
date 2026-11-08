@@ -11,7 +11,7 @@ from readaloud import updater as U
 windows_only = pytest.mark.skipif(
     sys.platform != "win32", reason="Windows .exe install target")
 
-BASE = "https://read-aloud-kvtn6ncvzmt.qoder.website/manifest.json"
+BASE = "https://read-aloud-si5xpl4ll0k.qoder.website/manifest.json"
 GOOD = b"pretend this is a new build"
 SHA = hashlib.sha256(GOOD).hexdigest()
 
@@ -100,7 +100,7 @@ def test_versions_and_platforms_are_parsed_strictly():
 def test_a_valid_manifest_names_one_verified_artifact_per_platform():
     art = U.parse_manifest(manifest(), "windows")
     assert art.version == "1.0.13"
-    assert art.url == "https://read-aloud-kvtn6ncvzmt.qoder.website/files/ReadAloud-1.0.13.exe"
+    assert art.url == "https://read-aloud-si5xpl4ll0k.qoder.website/files/ReadAloud-1.0.13.exe"
     assert art.size == len(GOOD) and art.sha256 == SHA
     arm = U.parse_manifest(manifest(), "macos-arm64")
     assert arm.name == "ReadAloud-Mac.zip"
@@ -113,7 +113,7 @@ def test_the_older_single_build_manifest_is_still_understood():
             **entry(name="ReadAloud-1.0.12.exe", path="/files/ReadAloud-1.0.12.exe")}
     art = U.parse_manifest(flat, "windows")
     assert art.version == "1.0.12" and art.size == len(GOOD)
-    assert art.url == "https://read-aloud-kvtn6ncvzmt.qoder.website/files/ReadAloud-1.0.12.exe"
+    assert art.url == "https://read-aloud-si5xpl4ll0k.qoder.website/files/ReadAloud-1.0.12.exe"
     with pytest.raises(U.UpdateError):
         U.parse_manifest(flat, "macos-arm64")
 
@@ -132,7 +132,7 @@ def test_manifest_without_a_usable_version_or_build_is_rejected(change):
 @pytest.mark.parametrize("bad", [
     {"path": "https://evil.example/ReadAloud.exe"},
     {"path": "//evil.example/ReadAloud.exe"},
-    {"path": "http://read-aloud-kvtn6ncvzmt.qoder.website/x.exe"},
+    {"path": "http://read-aloud-si5xpl4ll0k.qoder.website/x.exe"},
     {"sha256": "abc"},
     {"sha256": None},
     {"size_bytes": True},
@@ -178,7 +178,7 @@ def test_other_release_urls_are_still_rejected(path):
         U.parse_manifest(payload, "windows")
 
 
-@pytest.mark.parametrize("url", ["http://read-aloud-kvtn6ncvzmt.qoder.website/new",
+@pytest.mark.parametrize("url", ["http://read-aloud-si5xpl4ll0k.qoder.website/new",
                                   "https://other.example/new"])
 def test_update_redirect_cannot_leave_the_https_site(url):
     from urllib.request import Request
