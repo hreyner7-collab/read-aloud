@@ -5,6 +5,7 @@ A small floating button that reads out any text you select, using Microsoft's na
 **Select text in any app → click the button → it reads it out. Click again to stop.**
 
 - The button stays on top of every window, and you can drag it anywhere.
+- **Pause and carry on later.** Right-click the button and choose **Pause reading** (or click the button while it is paused to continue): it stops where it is, the button holds its place, and **Resume reading** starts again from the same sentence rather than from the top.
 - Right-click it to change the voice (British, American or Australian, male or female) or the speed.
 - **Speech streams as audio arrives**, sentence by sentence, without waiting for the whole passage. Decoded audio is kept in RAM so repeat reads can skip the network and decoder. The website publishes callback timings separately from audible latency; no 33× or 100× audible-speed improvement is claimed. Playback itself is always real time: a two-minute passage takes two minutes to speak.
 - No account or sign-up.
@@ -15,9 +16,9 @@ A small floating button that reads out any text you select, using Microsoft's na
 
 Use the public **[Read Aloud download website](https://read-aloud-kvtn6ncvzmt.qoder.website)**. No account is required.
 
-| Computer | Version 1.0.14 |
+| Computer | Version 1.0.15 |
 |---|---|
-| Windows 10 / 11, 64-bit | `ReadAloud-1.0.14.exe` |
+| Windows 10 / 11, 64-bit | `ReadAloud-1.0.15.exe` |
 | Mac with Apple Silicon (M1 or newer) | `ReadAloud-Mac.zip` (macOS 11+) |
 | Mac with an Intel chip | `ReadAloud-Mac-Intel.zip` (macOS 11+) |
 
@@ -31,7 +32,7 @@ Read Aloud checks the public website's manifest shortly after launch and every s
 
 On Windows the download is a one-time installer: it copies itself to `%LOCALAPPDATA%\Programs\Read Aloud\ReadAloud.exe`, adds a Start-menu shortcut, and starts that copy. Updates replace that single file in place, so there is only ever one Read Aloud and the file you downloaded can be deleted. A newer download updates the installed copy the same way — you never need to keep it.
 
-Read Aloud 1.0.13 and older checked a download path that no longer exists, so Windows users coming from those versions need one manual download of 1.0.14; from 1.0.14 on, updates are automatic.
+Read Aloud 1.0.13 and older checked a download path that no longer exists, so Windows users coming from those versions need one manual download of 1.0.15; from 1.0.14 on, updates are automatic.
 
 On a Mac, macOS may ask you to switch Read Aloud back on under **Privacy & Security → Accessibility** after an update, because each build is unsigned.
 
@@ -42,7 +43,7 @@ Older builds using the previous GitHub update feed need the website download onc
 These builds aren't signed with a paid Apple or Microsoft developer certificate, so both systems show a warning the first time. You only have to do this once.
 
 ### Windows
-1. Double-click `ReadAloud-1.0.14.exe`.
+1. Double-click `ReadAloud-1.0.15.exe`.
 2. If you see **"Windows protected your PC"**, click **More info → Run anyway**.
 3. The round button appears on the right of your screen. The download has installed the app in your user folder and added **Read Aloud** to the Start menu; you can delete the downloaded file and start it from there next time.
 4. Right-click the button and tick **Start with Windows** if you want it there every time.

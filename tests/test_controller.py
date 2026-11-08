@@ -24,6 +24,9 @@ class FakeEngine:
         self.offline_calls = []
         self.local = None
         self.cache = None
+        self.paused = False
+        self.pauses = 0
+        self.resumes = 0
 
     def speak(self, text):
         self.gen += 1
@@ -33,6 +36,20 @@ class FakeEngine:
     def stop(self):
         self.gen += 1
         self.stops += 1
+
+    def pause(self):
+        if self.paused:
+            return False
+        self.paused = True
+        self.pauses += 1
+        return True
+
+    def resume(self):
+        if not self.paused:
+            return False
+        self.paused = False
+        self.resumes += 1
+        return True
 
     def set_offline_only(self, on):
         self.offline_calls.append(on)
@@ -142,13 +159,40 @@ def test_double_click_reads_once(made):
     assert c.state == "loading"
 
 
-def test_second_click_while_busy_stops(made):
+def test_second_click_pauses_and_the_next_click_resumes(made):
     c, clock, sel, _ = made
     c.click()
     assert c.state == "loading"
     clock.now += 1.0
     c.click()
+    assert c.state == "paused"
+    assert c.engine.pauses == 1 and c.engine.stops == 0
+    clock.now += 1.0
+    c.click()
+    assert c.state == "speaking"
+    assert c.engine.resumes == 1 and c.engine.stops == 0
+    assert c.engine.speaks == ["Selected words."]
+
+
+def test_menu_stop_ends_a_paused_read(made):
+    c, clock, sel, _ = made
+    c.click()
+    clock.now += 1.0
+    c.click()
+    assert c.state == "paused"
+    c.stop_reading()
+    assert c.state == "idle"
     assert c.engine.stops == 1
+
+
+def test_menu_toggle_pause_matches_the_button(made):
+    c, clock, sel, _ = made
+    c.click()
+    c.toggle_pause()
+    assert c.state == "paused"
+    c.toggle_pause()
+    assert c.state == "speaking"
+    c.stop_reading()
     assert c.state == "idle"
 
 
@@ -211,7 +255,7 @@ def test_retry_uses_the_last_selection(made):
     c, clock, sel, _ = made
     c.click()
     clock.now += 1.0
-    c.click()                       # stop
+    c.stop_reading()                # stop
     c.retry()
     assert c.engine.speaks == ["Selected words.", "Selected words."]
 

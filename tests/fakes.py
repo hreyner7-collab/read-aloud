@@ -65,6 +65,32 @@ class FakePlayer:
         self.ended = False
         self.opened = False
         self.open_count = 0
+        self.paused = False
+        self._paused_at = None
+        self._paused_total = 0.0
+
+    def pause(self):
+        if self.stopped or self.finished or self.paused:
+            return False
+        self.paused = True
+        self._paused_at = time.monotonic()
+        return True
+
+    def resume(self):
+        if not self.paused:
+            return False
+        if self._paused_at is not None:
+            self._paused_total += time.monotonic() - self._paused_at
+            self._paused_at = None
+        self.paused = False
+        return True
+
+    @property
+    def paused_seconds(self):
+        total = self._paused_total
+        if self._paused_at is not None:
+            total += time.monotonic() - self._paused_at
+        return total
 
     def open(self, timeout=3.0):
         self.open_count += 1

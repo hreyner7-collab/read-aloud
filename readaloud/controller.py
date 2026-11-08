@@ -5,9 +5,9 @@ import time
 from . import engine as eng
 from .engine import Engine, log
 
-# Button states: idle, grabbing, loading, speaking, empty, error, permission,
-# offline_missing
-BUSY = ("grabbing", "loading", "speaking")
+# Button states: idle, grabbing, loading, speaking, paused, empty, error,
+# permission, offline_missing
+BUSY = ("grabbing", "loading", "speaking", "paused")
 FLASH = ("empty", "permission")     # shown briefly, then back to idle
 CLICK_DEBOUNCE = 0.35
 
@@ -15,6 +15,11 @@ CLICK_DEBOUNCE = 0.35
 def selftest_mode():
     import sys
     return "--selftest" in sys.argv
+
+
+def _speeds_voices():
+    from . import settings as st
+    return st.VOICES, st.SPEEDS
 
 
 class Controller:
@@ -74,12 +79,14 @@ class Controller:
         if self.updater.state == "ready" or self.updater.staged:
             self.install_update()
         else:
+            self._note("Checking for updates…")
             self.updater.check_now()
 
     def set_auto_update(self, on):
         self.settings["auto_update"] = self.updater.auto = bool(on)
         self._save()
         self.updater.sync_daily_task()
+        self._note("Daily update check on" if on else "Update checks are manual now")
         if on:
             self.updater.wake()
             if self.updater.state == "ready":
@@ -98,7 +105,7 @@ class Controller:
             self.last_error = detail or "couldn't read aloud"
         if s == "idle":
             self.warning = detail if detail else ""
-        if s in ("loading", "speaking"):
+        if s in ("loading", "speaking", "paused"):
             self.warning = ""
         self.state = s
         if self.view:
@@ -119,11 +126,16 @@ class Controller:
         self._last_click = now
         if self.state == "grabbing":
             return  # a click while the selection is being grabbed
-        self._token += 1
-        if self.state in BUSY:
-            self.engine.stop()
-            self._set("idle")
+        if self.state in ("speaking", "loading"):
+            if not self._pause():
+                self.engine.stop()
+                self._set("idle")
             return
+        if self.state == "paused":
+            if not self._resume():
+                self._set("idle")
+            return
+        self._token += 1
         if not self.sel.has_permission():
             self.sel.ask_permission()
             self._set("permission")
@@ -131,6 +143,30 @@ class Controller:
         self._set("grabbing")
         tok = self._token
         threading.Thread(target=self._grab, args=(tok,), daemon=True).start()
+
+    def _pause(self):
+        if not self.engine.pause():
+            return False
+        self._set("paused")
+        return True
+
+    def _resume(self):
+        if not self.engine.resume():
+            return False
+        self._set("speaking")
+        return True
+
+    def toggle_pause(self):
+        """Menu action: the same pause/resume a click on the button gives."""
+        if self.state == "paused":
+            self._resume()
+        elif self.state in ("speaking", "loading"):
+            self._pause()
+
+    def stop_reading(self):
+        if self.state in BUSY:
+            self.engine.stop()
+            self._set("idle")
 
     def _grab(self, tok):
         try:
@@ -161,10 +197,28 @@ class Controller:
     def set_voice(self, voice):
         eng.VOICE = self.settings["voice"] = voice
         self._save()
+        label = next((name for vid, name in _speeds_voices()[0] if vid == voice),
+                     voice)
+        if self.state in ("loading", "speaking", "paused"):
+            self._note(f"Voice: {label} — applies to the next read")
+        else:
+            self._note(f"Voice: {label}")
 
     def set_rate(self, rate):
         eng.RATE = self.settings["rate"] = rate
         self._save()
+        session = getattr(self.engine, "session", None)
+        if session is not None and self.state in ("loading", "speaking", "paused"):
+            # Sentences not synthesized yet use the new speed right away; the
+            # audio already queued keeps the speed it was spoken at.
+            session.rate = rate
+        label = next((name for value, name in _speeds_voices()[1] if value == rate),
+                     rate)
+        self._note(f"Speed: {label}")
+
+    def _note(self, text):
+        if self.view:
+            self.view.note(text)
 
     def set_offline_only(self, on):
         on = bool(on)
@@ -197,6 +251,7 @@ class Controller:
         if local is None:
             return  # still starting; the menu will offer it again
         local.retry_download()
+        self._note("Downloading the offline voice…")
         self._update_changed()
 
     def set_disk_cache(self, on):
@@ -207,12 +262,15 @@ class Controller:
             if not on:
                 cache.clear_disk()
         self._save()
+        self._note("Keeping recent audio on disk" if on
+                   else "Disk cache off — cleared")
 
     def clear_cache(self):
         cache = self.engine.cache
         if cache is not None:
             cache.clear_ram()
             cache.clear_disk()
+        self._note("Audio cache cleared")
 
     def offline_status(self):
         try:

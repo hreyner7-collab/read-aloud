@@ -54,7 +54,8 @@ LOOK = {  # state: (symbol, background colour)
     "idle": ("speaker.wave.2.fill", lambda: NSColor.colorWithCalibratedWhite_alpha_(0.13, 0.92)),
     "grabbing": (None, lambda: NSColor.colorWithCalibratedWhite_alpha_(0.13, 0.92)),
     "loading": (None, lambda: NSColor.colorWithCalibratedWhite_alpha_(0.13, 0.92)),
-    "speaking": ("stop.fill", lambda: NSColor.systemBlueColor()),
+    "speaking": ("pause.fill", lambda: NSColor.systemBlueColor()),
+    "paused": ("play.fill", lambda: NSColor.systemIndigoColor()),
     "empty": ("character.cursor.ibeam", lambda: NSColor.systemOrangeColor()),
     "permission": ("lock.fill", lambda: NSColor.systemOrangeColor()),
     "offline_missing": ("arrow.down.circle.fill", lambda: NSColor.systemOrangeColor()),
@@ -62,7 +63,8 @@ LOOK = {  # state: (symbol, background colour)
 }
 TIPS = {
     "idle": "Select text anywhere, then click to read it aloud",
-    "speaking": "Click to stop",
+    "speaking": "Click to pause · right-click to stop",
+    "paused": "Paused — click to continue",
     "empty": "Select some text first",
     "permission": "Allow Read Aloud in System Settings > Privacy & Security > Accessibility",
     "error": "Couldn't read aloud - check your internet connection",
@@ -242,6 +244,13 @@ class MenuHandler(NSObject):
     def retry_(self, sender):
         self.app.controller.retry()
 
+    def pauseReading_(self, sender):
+        self.app.controller.toggle_pause()
+
+    def stopReading_(self, sender):
+        self.app.controller.stop_reading()
+        self.app.refresh_menu()
+
     def downloadOffline_(self, sender):
         self.app.controller.download_offline()
         self.app.refresh_menu()
@@ -273,6 +282,7 @@ class MacApp:
         self._build_window()
         self.controller.view = self
         self._build_menu()
+        self._last_update_state = self.controller.updater.state
         self.controller.start()
 
     def _build_main_menu(self):
@@ -362,6 +372,12 @@ class MacApp:
             return sub
 
         status = self.controller.last_error or self.controller.warning
+        state = self.controller.state
+        if state in ("loading", "speaking", "paused"):
+            item("Resume reading" if state == "paused" else "Pause reading",
+                 "pauseReading:")
+            item("Stop reading", "stopReading:")
+            m.addItem_(NSMenuItem.separatorItem())
         if status:
             it = item(mt.status_line(status), None)
             it.setEnabled_(False)
@@ -417,7 +433,9 @@ class MacApp:
         a.setMessageText_("Read Aloud")
         a.setInformativeText_(
             "Select text in any app, then click the round button to hear it read aloud. "
-            "Click again to stop.\n\n"
+            "Click it while it's reading to pause, and click again to carry on from "
+            "exactly where you stopped. Right-click and choose Stop reading to end it."
+            "\n\n"
             "Drag the button wherever you like. Right-click it for voices and speed.\n\n"
             "The first time, macOS will ask you to allow Read Aloud under Privacy & "
             "Security > Accessibility. It needs that to see the text you've selected.")
@@ -440,7 +458,12 @@ class MacApp:
         NSApp.terminate_(None)
 
     def update_status_changed(self):
-        pass  # the menu is rebuilt each time it opens
+        state = self.controller.updater.state
+        if state == getattr(self, "_last_update_state", None):
+            return
+        self._last_update_state = state
+        if state in ("up_to_date", "not_available", "ready", "error"):
+            self.note(self.controller.updater.status_text())
 
     def _first_run(self):
         self.welcome()

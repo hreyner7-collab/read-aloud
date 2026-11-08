@@ -8,35 +8,40 @@ import ctypes
 import os
 import queue
 import tkinter as tk
+import traceback
 from tkinter import font as tkfont
 from tkinter import messagebox
 
 from . import settings as st
 from . import menu_text as mt
 from .controller import Controller
+from .paths import log
 
 IS_WIN = os.name == "nt"
 KEY = "#ff00fe"  # transparent colour around the round button
 
 COLOURS = {
     "idle": "#232323", "grabbing": "#232323", "loading": "#232323",
-    "speaking": "#0a84ff", "empty": "#ff9f0a", "permission": "#ff9f0a",
-    "offline_missing": "#ff9f0a", "error": "#ff453a",
+    "speaking": "#0a84ff", "paused": "#5e5ce6", "empty": "#ff9f0a",
+    "permission": "#ff9f0a", "offline_missing": "#ff9f0a", "error": "#ff453a",
 }
 # Segoe MDL2 Assets / Segoe Fluent Icons glyphs (built into Windows 10 and 11)
-GLYPHS = {"idle": "\ue767", "speaking": "\ue71a", "empty": "\ue7ba",
-          "permission": "\ue72e", "error": "\ue7ba"}
+GLYPHS = {"idle": "\ue767", "speaking": "\ue769", "paused": "\ue768",
+          "empty": "\ue7ba", "permission": "\ue72e", "error": "\ue7ba"}
 GLYPHS["offline_missing"] = GLYPHS["empty"]
 TIP_IDLE = "Select text anywhere, then click to read it aloud"
 TIPS = {
-    "speaking": "Click to stop",
+    "speaking": "Click to pause · right-click to stop",
+    "paused": "Paused — click to continue",
     "empty": "Select some text first",
     "permission": "Allow Read Aloud in Settings > Privacy & security > Accessibility",
     "error": "Couldn't read aloud — open the menu for why, or Try again",
     "offline_missing": "Offline voice not downloaded — menu › Voice › Download offline voice",
 }
 HELP = ("Select text in any app, then click the round button to hear it read aloud. "
-        "Click again to stop.\n\n"
+        "Click it while it's reading to pause, and click again to carry on from "
+        "exactly where you stopped. Right-click the button and choose Stop reading "
+        "to end it.\n\n"
         "Drag the button wherever you like. Right-click it for voices, speed, "
         "and to start it automatically with Windows.\n\n"
         "If part of a sentence could not be read, a small orange dot stays on the "
@@ -102,6 +107,7 @@ class WinApp:
         self.q = queue.Queue()
         self.root = tk.Tk()
         self.root.title("Read Aloud")
+        self.root.report_callback_exception = self._ui_error
         self.scale = self.root.winfo_fpixels("1i") / 96.0
         self.size = int(52 * self.scale)
         self.settings = st.load()
@@ -121,6 +127,7 @@ class WinApp:
         self._build_window()
         self.controller.view = self
         self._build_menu()
+        self._last_update_state = self.controller.updater.state
         self.show("idle", "")
         self.root.after(30, self._drain)
         self.controller.start()
@@ -298,7 +305,18 @@ class WinApp:
         self.root.destroy()
 
     def update_status_changed(self):
-        pass  # the menu is rebuilt each time it opens
+        """Say the result out loud on the button; the menu may be closed."""
+        state = self.controller.updater.state
+        if state == getattr(self, "_last_update_state", None):
+            return
+        self._last_update_state = state
+        if state in ("up_to_date", "not_available", "ready", "error"):
+            self.note(self.controller.updater.status_text())
+
+    def _ui_error(self, exc, value, tb):
+        """A Tk callback failed: keep it in the log instead of losing it."""
+        where = traceback.extract_tb(tb)[-1].name if tb else "?"
+        log("ui error in %s: %s: %s" % (where, exc.__name__, value))
 
     def quit(self):
         try:
@@ -335,12 +353,17 @@ class WinApp:
 
     # ---- right-click menu
     def _build_menu(self):
+        """Build the whole menu once, here, at startup.
+
+        Tk only dispatches a row's command when that row already existed the
+        first time the menu was posted.  Rows created - or delete(0,"end")'d
+        and re-added - inside the right-click handler close the menu and run
+        nothing, which is how every option came back "does nothing".  So the
+        row set is permanent and _refresh_menu() changes only labels, states
+        and the variables the ticks read.
+        """
         if self.menu is not None:
-            try:
-                self.menu.destroy()    # one menu lives at a time (no Tk leak)
-            except tk.TclError:
-                pass
-            self.menu = None
+            return
         controller = self.controller
 
         def make(parent):
@@ -348,77 +371,176 @@ class WinApp:
                            activebackground="#0a84ff", activeforeground="white")
 
         m = make(self.root)
-        status = controller.last_error or controller.warning
-        if status:
-            m.add_command(label=mt.status_line(status), state="disabled")
-            m.add_command(label="Try again", command=controller.retry)
-            m.add_separator()
+        self._i = {}
+        self._sub = {}
+
+        class Rows:
+            """Adds rows to one menu and remembers each row's index.
+
+            Tk reports a menu's "end" as its last row rather than one past it,
+            so asking for an index after adding is off by one; _refresh_menu()
+            needs the right number to change a label or grey a row out.
+            """
+
+            def __init__(self, menu):
+                self.menu, self.n = menu, 0
+
+            def add(self, key, kind, **kw):
+                getattr(self.menu, "add_" + kind)(**kw)
+                self.n, here = self.n + 1, self.n
+                if key:
+                    idx[key] = here
+                return here
+
+            def sep(self):
+                self.menu.add_separator()
+                self.n += 1
+
+        idx = self._i
+        top = Rows(m)
+        top.add("pause", "command", label="Pause reading", state="disabled",
+                command=controller.toggle_pause)
+        top.add("stop", "command", label="Stop reading", state="disabled",
+                command=controller.stop_reading)
+        top.sep()
+        top.add("status", "command", label="Ready", state="disabled")
+        top.add("retry", "command", label="Try again", state="disabled",
+                command=controller.retry)
+        top.sep()
 
         self.voice_var = tk.StringVar(value=self.settings["voice"])
         self.rate_var = tk.StringVar(value=self.settings["rate"])
         self.login_var = tk.BooleanVar(value=st.login_item_enabled())
-        voices = make(m)
-        for vid, label in st.VOICES:
-            voices.add_radiobutton(label=label, value=vid, variable=self.voice_var,
-                                   command=lambda: controller.set_voice(self.voice_var.get()))
         self.offline_var = tk.BooleanVar(value=bool(self.settings.get("offline_only")))
-        voices.add_separator()
-        voices.add_command(label=mt.offline_status(controller), state="disabled")
-        local = controller.engine.local
-        if local is not None and not local.ready:
-            voices.add_command(label=mt.DOWNLOAD_LABEL,
-                               command=controller.download_offline)
-        voices.add_separator()
+        self.disk_cache_var = tk.BooleanVar(value=bool(self.settings.get("disk_cache")))
+        self.auto_update_var = tk.BooleanVar(
+            value=bool(self.settings.get("auto_update", True)))
+
+        voices = make(m)
+        vr = Rows(voices)
+        for vid, label in st.VOICES:
+            vr.add(None, "radiobutton", label=label, value=vid, variable=self.voice_var,
+                   command=lambda: controller.set_voice(self.voice_var.get()))
+        vr.sep()
+        vr.add("voices_offline", "command", label=mt.offline_status(controller),
+               state="disabled")
+        vr.add("voices_download", "command", label=mt.DOWNLOAD_LABEL, state="disabled",
+               command=controller.download_offline)
+        vr.sep()
         # The mode switch is the last row: a disabled status line sitting under
         # it made people click the wrong thing and think the switch did nothing.
-        voices.add_checkbutton(
-            label=mt.OFFLINE_LABEL, variable=self.offline_var,
-            command=lambda: controller.set_offline_only(
-                not bool(self.settings.get("offline_only"))))
-        m.add_cascade(label=mt.voice_title(self.settings), menu=voices)
+        vr.add(None, "checkbutton", label=mt.OFFLINE_LABEL, variable=self.offline_var,
+               command=lambda: controller.set_offline_only(
+                   not bool(self.settings.get("offline_only"))))
+        top.add("voice_cascade", "cascade", label=mt.voice_title(self.settings),
+                menu=voices)
 
         speeds = make(m)
+        sr = Rows(speeds)
         for rate, label in st.SPEEDS:
-            speeds.add_radiobutton(label=label, value=rate, variable=self.rate_var,
-                                   command=lambda: controller.set_rate(self.rate_var.get()))
-        m.add_cascade(label=mt.speed_title(self.settings), menu=speeds)
+            sr.add(None, "radiobutton", label=label, value=rate,
+                   variable=self.rate_var,
+                   command=lambda: controller.set_rate(self.rate_var.get()))
+        top.add("speed_cascade", "cascade", label=mt.speed_title(self.settings),
+                menu=speeds)
 
         cache = make(m)
-        cache.add_command(label=mt.CACHE_NOTE, state="disabled")
-        self.disk_cache_var = tk.BooleanVar(value=bool(self.settings.get("disk_cache")))
-        cache.add_checkbutton(label=mt.DISK_LABEL, variable=self.disk_cache_var,
-                              command=lambda: controller.set_disk_cache(
-                                  self.disk_cache_var.get()))
-        cache.add_command(label="Clear audio cache", command=controller.clear_cache)
-        m.add_cascade(label="Audio cache", menu=cache)
+        cr = Rows(cache)
+        cr.add(None, "command", label=mt.CACHE_NOTE, state="disabled")
+        cr.add(None, "checkbutton", label=mt.DISK_LABEL, variable=self.disk_cache_var,
+               command=lambda: controller.set_disk_cache(self.disk_cache_var.get()))
+        cr.add(None, "command", label="Clear audio cache", command=controller.clear_cache)
+        top.add("cache_cascade", "cascade", label="Audio cache", menu=cache)
 
-        m.add_separator()
-        if st.login_item_supported():
-            m.add_checkbutton(label="Start with Windows", variable=self.login_var,
-                              command=lambda: st.set_login_item(self.login_var.get()))
-        m.add_command(label=mt.HOW_TO_LABEL, command=lambda: self.welcome(force=True))
+        top.sep()
+        top.add("login", "checkbutton", label="Start with Windows",
+                variable=self.login_var, state="disabled", command=self._login_toggled)
+        top.add(None, "command", label=mt.HOW_TO_LABEL,
+                command=lambda: self.welcome(force=True))
 
-        up = controller.updater
         updates = make(m)
-        updates.add_command(label=mt.update_status(up), state="disabled")
-        if up.supported:
-            updates.add_command(label=mt.update_action(up),
-                                command=controller.check_for_updates)
-            self.auto_update_var = tk.BooleanVar(
-                value=bool(self.settings.get("auto_update", True)))
-            updates.add_checkbutton(label="Update automatically", variable=self.auto_update_var,
-                                    command=lambda: controller.set_auto_update(
-                                        self.auto_update_var.get()))
-        m.add_cascade(label="Updates", menu=updates)
+        ur = Rows(updates)
+        ur.add("updates_status", "command", label=mt.update_status(controller.updater),
+               state="disabled")
+        ur.add("updates_action", "command", label=mt.update_action(controller.updater),
+               state="disabled", command=controller.check_for_updates)
+        ur.add("updates_auto", "checkbutton", label="Update automatically",
+               variable=self.auto_update_var, state="disabled",
+               command=lambda: controller.set_auto_update(self.auto_update_var.get()))
+        # The same three rows on every build: an option that goes missing when
+        # it doesn't apply reads as the app ignoring you, whereas a greyed row
+        # reads as "not here". _refresh_menu() enables them when they apply.
+        top.add("updates_cascade", "cascade", label="Updates", menu=updates)
 
-        m.add_separator()
-        m.add_command(label="Quit Read Aloud", command=self.quit)
+        top.sep()
+        top.add("quit", "command", label="Quit Read Aloud", command=self.quit)
+
+        self._sub = {"voice": voices, "speed": speeds, "cache": cache,
+                     "updates": updates}
         self.menu = m
+        self._log_rows(m)
+        self._refresh_menu()
+
+    def _log_rows(self, m):
+        """The row labels, once at startup, for scripts/test_menu_win.py: it
+        cannot read them through GetMenuStringW across processes, so the app
+        has to report them.  Keyed by the row that opens each submenu."""
+        def parts(menu):
+            return " || ".join("---" if menu.type(i) == "separator"
+                               else menu.entrycget(i, "label")
+                               for i in range(menu.index("end") + 1))
+
+        log("menu rows main: %s" % parts(m))
+        for key, name in (("voice_cascade", "voice"), ("speed_cascade", "speed"),
+                          ("cache_cascade", "cache"), ("updates_cascade", "updates")):
+            log("menu rows %s: %s" % (m.entrycget(self._i[key], "label"),
+                                      parts(self._sub[name])))
+
+    def _refresh_menu(self):
+        """Point the fixed rows at the way things are right now."""
+        m, controller = self.menu, self.controller
+        if m is None:
+            return
+        speaking = controller.state in ("loading", "speaking", "paused")
+        paused = controller.state == "paused"
+        m.entryconfig(self._i["pause"], state="normal" if speaking else "disabled",
+                      label="Resume reading" if paused else "Pause reading")
+        m.entryconfig(self._i["stop"], state="normal" if speaking else "disabled")
+        note = controller.last_error or controller.warning
+        m.entryconfig(self._i["status"],
+                      label=mt.status_line(note) if note else "Ready")
+        m.entryconfig(self._i["retry"], state="normal" if controller.last_error
+                      else "disabled")
+        m.entryconfig(self._i["login"],
+                      state="normal" if st.login_item_supported() else "disabled")
+        m.entryconfig(self._i["voice_cascade"], label=mt.voice_title(self.settings))
+        m.entryconfig(self._i["speed_cascade"], label=mt.speed_title(self.settings))
+        voices = self._sub["voice"]
+        local = controller.engine.local
+        voices.entryconfig(self._i["voices_offline"],
+                           label=mt.offline_status(controller), state="disabled")
+        voices.entryconfig(
+            self._i["voices_download"], state="normal"
+            if (local is not None and not local.ready) else "disabled")
+        up = controller.updater
+        updates = self._sub["updates"]
+        updates.entryconfig(self._i["updates_status"], label=mt.update_status(up))
+        updates.entryconfig(self._i["updates_action"], label=mt.update_action(up),
+                            state="normal" if up.supported else "disabled")
+        updates.entryconfig(self._i["updates_auto"],
+                            state="normal" if up.supported else "disabled")
+        self.voice_var.set(self.settings["voice"])
+        self.rate_var.set(self.settings["rate"])
+        self.offline_var.set(bool(self.settings.get("offline_only")))
+        self.disk_cache_var.set(bool(self.settings.get("disk_cache")))
+        self.auto_update_var.set(bool(self.settings.get("auto_update", True)))
+        self.login_var.set(bool(st.login_item_enabled()))
 
     def _menu(self, e):
         self._tip_hide()
-        self._build_menu()  # so statuses are current
+        self._refresh_menu()
         m = self.menu
+        saved = self._menu_foreground()
         try:
             m.tk_popup(e.x_root, e.y_root)
         finally:
@@ -426,12 +548,43 @@ class WinApp:
                 m.grab_release()
             except tk.TclError:
                 pass
-            try:
-                m.destroy()
-            except tk.TclError:
-                pass
-            if self.menu is m:
-                self.menu = None
+            self._menu_restore(saved)
+
+    def _menu_foreground(self):
+        """Let the menu take clicks, then put focus back where it was.
+
+        This window is WS_EX_NOACTIVATE so it never steals focus from the app
+        you're reading in.  Windows only delivers a popup menu's clicks when
+        its owner is foreground: without this, the first click anywhere in the
+        menu just closed it and no command ever ran.  The style comes back the
+        moment the menu closes.
+        """
+        if not (IS_WIN and self.hwnd):
+            return None
+        u = ctypes.windll.user32
+        try:
+            previous = u.GetForegroundWindow()
+            style = u.GetWindowLongW(self.hwnd, -20)      # GWL_EXSTYLE
+            u.SetWindowLongW(self.hwnd, -20, style & ~0x08000000)  # ~NOACTIVATE
+            ok = u.SetForegroundWindow(self.hwnd)
+            if not ok:  # the menu will close on the first click; say why
+                log("menu: could not take foreground (fg=%s self=%s)" % (
+                    u.GetForegroundWindow(), self.hwnd))
+        except Exception:
+            return None
+        return previous, style
+
+    def _menu_restore(self, saved):
+        if saved is None or not IS_WIN or not self.hwnd:
+            return
+        previous, style = saved
+        u = ctypes.windll.user32
+        try:
+            u.SetWindowLongW(self.hwnd, -20, style)
+            if previous and u.IsWindow(previous):
+                u.SetForegroundWindow(previous)
+        except Exception:
+            pass
 
     def welcome(self, force=False):
         if self.settings.get("welcomed") and not force:
@@ -444,6 +597,12 @@ class WinApp:
         if not self.settings.get("welcomed"):
             self.settings["welcomed"] = True   # only after it was dismissed
             st.save(self.settings)
+
+    def _login_toggled(self):
+        on = bool(self.login_var.get())
+        st.set_login_item(on)
+        self.note("Read Aloud starts with Windows" if on
+                  else "Read Aloud no longer starts with Windows")
 
     def run(self):
         if self.selftest:

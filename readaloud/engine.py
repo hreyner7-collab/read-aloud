@@ -589,6 +589,25 @@ class Engine:
         self._stop_read()
         self._emit("idle", "", gen)
 
+    @property
+    def paused(self):
+        session = self.session
+        return bool(session is not None and session.player is not None
+                    and session.player.paused)
+
+    def pause(self):
+        """Pause the current read in place; the generation is untouched."""
+        session = self.session
+        if session is None or session.player is None:
+            return False
+        return session.player.pause()
+
+    def resume(self):
+        session = self.session
+        if session is None or session.player is None:
+            return False
+        return session.player.resume()
+
     def set_voice(self, voice=None, rate=None):
         global VOICE, RATE
         if voice:

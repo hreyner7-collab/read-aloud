@@ -341,7 +341,7 @@ class Session:
             if not self.offline_only:
                 self.engine.begin_read()
             try:
-                await asyncio.wait_for(self._run_atoms(), timeout=self._hard_deadline())
+                await self._until_deadline(self._run_atoms())
             except asyncio.TimeoutError:
                 self.timed_out = True
             self._trace(f"atoms returned timed_out={int(self.timed_out)}")
@@ -387,18 +387,42 @@ class Session:
             self._log_report(summary)
 
     async def _wait_for_playback(self):
-        remaining = max(1.0, self._hard_deadline() - (time.perf_counter() - self.t0))
-        if self.ledger.summary()["complete"]:
-            # A slow first packet can use most of the hard deadline before any
-            # sound starts.  Once every atom is decoded, playback gets its own
-            # window: otherwise a complete read is reported as a timeout at the
-            # exact moment the last sentence finishes.
-            remaining = max(remaining, self.player.queued_seconds() + 10.0)
+        while not self.finished.is_set():
+            remaining = self._hard_deadline() - self._active_seconds()
+            if self.ledger.summary()["complete"]:
+                # A slow first packet can use most of the hard deadline before
+                # any sound starts.  Once every atom is decoded, playback gets
+                # its own window: otherwise a complete read is reported as a
+                # timeout at the exact moment the last sentence finishes.
+                remaining = max(remaining, self.player.queued_seconds() + 10.0)
+            if remaining <= 0:
+                self.timed_out = True
+                await asyncio.to_thread(self.player.stop, 3.0)
+                return
+            try:
+                await asyncio.wait_for(self.finished.wait(), min(remaining, 0.5))
+            except asyncio.TimeoutError:
+                pass
+
+    def _active_seconds(self):
+        paused = self.player.paused_seconds if self.player is not None else 0.0
+        return time.perf_counter() - self.t0 - paused
+
+    async def _until_deadline(self, coro):
+        """Run `coro` under the read deadline, not counting time spent paused."""
+        task = asyncio.ensure_future(coro)
         try:
-            await asyncio.wait_for(self.finished.wait(), remaining)
-        except asyncio.TimeoutError:
-            self.timed_out = True
-            await asyncio.to_thread(self.player.stop, 3.0)
+            while True:
+                remaining = self._hard_deadline() - self._active_seconds()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                done, _pending = await asyncio.wait({task},
+                                                   timeout=min(remaining, 0.25))
+                if task in done:
+                    return task.result()
+        finally:
+            if not task.done():
+                task.cancel()
 
     def _hard_deadline(self):
         chars = sum(len(a.text) for a in self.atoms)

@@ -65,8 +65,8 @@ def test_voice_title_shows_when_offline_only_is_on():
 
 def test_windows_offline_rows_put_the_switch_last():
     src = source("readaloud/ui_win.py")
-    menu = src[src.index("self.offline_var = tk.BooleanVar"):
-               src.index("m.add_cascade(label=mt.voice_title")]
+    menu = src[src.index("        voices = make(m)"):
+               src.index('top.add("voice_cascade"')]
     assert menu.index("mt.offline_status(controller)") < menu.index("mt.OFFLINE_LABEL")
     assert menu.index("mt.DOWNLOAD_LABEL") < menu.index("mt.OFFLINE_LABEL")
     assert 'not bool(self.settings.get("offline_only"))' in menu

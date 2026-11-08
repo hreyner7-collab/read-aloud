@@ -371,6 +371,69 @@ def test_g5_hundred_device_losses_rebuild_one_at_a_time(fast, made):
     assert worst_replay <= P._RESUME_FRAMES == int(24000 * 0.05)
 
 
+def test_pause_holds_the_exact_sample_and_resume_continues(fast, made):
+    factory = Factory()
+    p = _player(made, factory)
+    assert p.open()
+    ramp = array.array("h", range(2400))
+    p.add(("a", 1), ramp)
+    dev = factory.devices[0]
+    first = dev.pull(480)
+    assert p.pause() is True
+    assert p.paused
+    silence = dev.pull(480)
+    assert set(silence) == {0}                  # nothing consumed while paused
+    assert p.frames_played == 480
+    assert p.queued_seconds() == pytest.approx((2400 - 480) / 24000)
+    time.sleep(0.02)
+    assert p.paused_seconds > 0
+    assert p.pause() is False                   # already paused
+    assert p.resume() is True
+    second = dev.pull(480)
+    assert list(first + second) == list(ramp[:960])   # no gap, no replay
+    assert p.frames_played == 960
+
+
+def test_pause_is_not_a_device_stall(fast, made):
+    factory = Factory()
+    p = _player(made, factory)
+    assert p.open()
+    p.add(("a", 1), PCM)
+    factory.devices[0].pull(240)
+    assert p.pause()
+    time.sleep(0.15)                            # 3x STALL_SECONDS
+    assert len(factory.devices) == 1
+    assert P.live_count() == 1
+
+
+def test_pause_holds_back_the_end_until_resume(fast, made):
+    factory, reasons = Factory(), []
+    p = _player(made, factory, on_finished=reasons.append)
+    assert p.open()
+    p.add(("a", 1), PCM)
+    p.end()
+    assert p.pause()
+    for _ in range(10):
+        assert set(factory.devices[0].pull(240)) == {0}
+        p._check()
+    assert reasons == []
+    assert p.resume()
+    assert list(factory.devices[0].pull(2400)) == list(PCM)
+    assert wait_for(lambda: reasons == ["finished"], 1.0)
+
+
+def test_stop_while_paused_still_closes(fast, made):
+    factory, reasons = Factory(), []
+    p = _player(made, factory, on_finished=reasons.append)
+    assert p.open()
+    p.add(("a", 1), PCM)
+    assert p.pause()
+    assert p.stop() is True
+    assert p.paused is False
+    assert reasons == ["stopped"]
+    assert P.live_count() == 0
+
+
 def test_one_live_max_across_many_open_stop_cycles(fast, made):
     peak = 0
     for _ in range(50):

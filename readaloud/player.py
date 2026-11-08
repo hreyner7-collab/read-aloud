@@ -92,6 +92,9 @@ class AudioPlayer:
         self._finished = False
         self._closed = False
         self._first_sound = False
+        self._paused = False
+        self._paused_at = None
+        self._paused_total = 0.0
         self._last_progress = time.monotonic()
         self._device = None
         self._gen = None
@@ -126,6 +129,8 @@ class AudioPlayer:
         """Stop emitting now and close the device; safe to call repeatedly."""
         with self._lock:
             self._stopped = True
+            self._paused = False
+            self._paused_at = None
             self._q.clear()
             self._queued_frames = 0
         if not self._closed:
@@ -134,6 +139,47 @@ class AudioPlayer:
         reason = "stopped"
         self._finish(reason)
         return self._closed
+
+    def pause(self):
+        """Hold playback at the exact frame; the queue is not consumed.
+
+        The audio callback keeps filling the device with silence, so the
+        device stays open and resuming is sample-exact rather than a rewind
+        to the last sentence.
+        """
+        with self._lock:
+            if self._stopped or self._finished or self._paused:
+                return False
+            self._paused = True
+            self._paused_at = time.monotonic()
+        return True
+
+    def resume(self):
+        with self._lock:
+            if not self._paused:
+                return False
+            if self._paused_at is not None:
+                self._paused_total += time.monotonic() - self._paused_at
+                self._paused_at = None
+            self._paused = False
+            self._last_progress = time.monotonic()
+            if self._ended and not self._q:
+                self._empty_since = time.monotonic()
+        return True
+
+    @property
+    def paused(self):
+        with self._lock:
+            return self._paused
+
+    @property
+    def paused_seconds(self):
+        """Time spent paused; a paused read must not hit its wall-clock cap."""
+        with self._lock:
+            total = self._paused_total
+            if self._paused_at is not None:
+                total += time.monotonic() - self._paused_at
+            return total
 
     def end(self):
         """The producer has appended everything; finish after the queue drains."""
@@ -343,6 +389,8 @@ class AudioPlayer:
             return
         now = time.monotonic()
         with self._lock:
+            if self._paused:
+                return  # deliberately silent: neither a stall nor the end
             stalled = (self._device is not None and self._q
                        and not self._rebuilding and not self._rebuild_pending
                        and now - self._last_progress > STALL_SECONDS)
@@ -364,7 +412,7 @@ class AudioPlayer:
 
     def _fill(self, need):
         with self._lock:
-            if self._stopped:
+            if self._stopped or self._paused:
                 return _silence(need)
             out = array.array("h")
             played = 0
